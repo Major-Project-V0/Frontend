@@ -3,6 +3,21 @@
     padding: 0;
 }
 
+@font-face {
+  font-family: 'montbold'; /* Name you will use in CSS */
+  src: url('./assets/fonts/Montserrat-Bold.ttf');
+}
+
+@font-face {
+  font-family: 'montsemibold'; /* Name you will use in CSS */
+  src: url('./assets/fonts/Montserrat-SemiBold.ttf');
+}
+
+@font-face {
+  font-family: 'montregular'; /* Name you will use in CSS */
+  src: url('./assets/fonts/Montserrat-Regular.ttf');
+}
+
 .form-container {
   background-image: url('./assets/images/login-bg.jpg'); /* adjust path */
   background-size: cover;
@@ -16,7 +31,7 @@
 }
 
 span.title{
-    font-family: mont-bold;
+    font-family: montbold;
     background: -webkit-linear-gradient(#b83cc4, #3c176b);
     -webkit-background-clip: text;
     -webkit-text-fill-color: transparent;
@@ -24,7 +39,7 @@ span.title{
 }
 
 span.sub-title{
-    font-family: mont-regular;
+    font-family: montregular;
     background: -webkit-linear-gradient(#830f8d, #230e3f);
     -webkit-background-clip: text;
     -webkit-text-fill-color: transparent;
@@ -49,7 +64,8 @@ span.sub-title{
 
 .formbox {
     position: relative;
-    padding: 20px;
+    font-family: montregular;
+    padding: 30px;
     border-radius: 10px;
     background: rgba(255, 255, 255, 0.35);
     -webkit-backdrop-filter: blur(10px);
@@ -95,4 +111,22 @@ input.submit{
     box-shadow: 5px 5px 10px #cecece;
     border: 1px solid rgb(190, 188, 188);
     align-self: center;
+    
+}
+
+
+button.submit{
+    font-family: montregular;
+    font-size: 14px;
+    margin: auto;
+    border: none;
+    background: transparent;
+    margin-top: 20px;
+    text-decoration: underline;
+    color: #525252;
+}
+
+button.submit:hover{
+    color: #3c176b;
+    cursor: pointer;
 }

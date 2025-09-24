@@ -1,5 +1,5 @@
 import React from 'react';
-import './nav-bar.css'; // optional: move specific styles here
+import './nav-bar.css'; 
 import { Link } from 'react-router-dom';
 
 function Navbar() {
@@ -13,7 +13,7 @@ function Navbar() {
         <ul>
           <li>Home</li>
           <li>Prepare</li>
-          <li><Link to='/login'>Login</Link></li>
+          <li><Link to='/login' className='login'>Login</Link></li>
         </ul>
       </div>
     </nav>
