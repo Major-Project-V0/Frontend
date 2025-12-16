@@ -45,7 +45,6 @@ import './login.css';
 import backgrnd from './assets/images/login-bg.jpg';
 
 function Login() {
-  const [count, setCount] = useState(0);
   const [isAuthenticated, setIsAuthenticated] = useState(!!localStorage.getItem('token'));
   const [isLoading, setIsLoading] = useState(true);
   const [isLogin, setIsLogin] = useState(true);
@@ -93,7 +92,7 @@ function Login() {
     }
 
     try {
-      const response = await axios.post('https://bq6sglcv-8000.inc1.devtunnels.ms/api/accounts/register/', {
+      const response = await axios.post('http://localhost:8000/api/accounts/register/', {
         username: formData.username,
         email: formData.email,
         password: formData.password,
@@ -121,7 +120,7 @@ function Login() {
     setLoading(true);
 
     try {
-      const response = await axios.post('https://bq6sglcv-8000.inc1.devtunnels.ms/api/accounts/login/', {
+      const response = await axios.post('http://localhost:8000/api/accounts/login/', {
         username: formData.username,
         password: formData.password
       }, {
@@ -144,7 +143,6 @@ function Login() {
   const handleLogout = () => {
     localStorage.removeItem('token');
     setIsAuthenticated(false);
-    setCount(0);
     navigate('/');
   };
 
@@ -157,20 +155,6 @@ function Login() {
       {isAuthenticated ? (
         <div className="formbox">
           <span className="title">MockiT Dashboard</span>
-          <span className="sub-title">Interview Preparation Counter: {count}</span>
-          <button
-            onClick={() => setCount(count + 1)}
-            className="submit"
-          >
-            Increment Counter
-          </button>
-          <button
-            onClick={handleLogout}
-            className="submit"
-            style={{ backgroundColor: '#e53e3e', marginLeft: '10px' }}
-          >
-            Logout
-          </button>
         </div>
       ) : (
         <>
