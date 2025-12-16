@@ -11,7 +11,7 @@ function App() {
   const navigate = useNavigate();
 
   const handleStartClick = () => {
-  navigate('/interview'); // Redirect to interview route
+    navigate('/choice'); // Redirect to choice  
   };
 
   return (
