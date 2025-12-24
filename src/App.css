@@ -1,0 +1,203 @@
+*{
+    margin: 0;
+    padding: 0;
+}
+
+@font-face {
+  font-family: 'montbold'; /* Name you will use in CSS */
+  src: url('./assets/fonts/Montserrat-Bold.ttf');
+}
+
+@font-face {
+  font-family: 'montsemibold'; /* Name you will use in CSS */
+  src: url('./assets/fonts/Montserrat-SemiBold.ttf');
+}
+
+@font-face {
+  font-family: 'montregular'; /* Name you will use in CSS */
+  src: url('./assets/fonts/Montserrat-Regular.ttf');
+}
+
+@font-face {
+  font-family: 'montlight'; /* Name you will use in CSS */
+  src: url('./assets/fonts/Montserrat-Light.ttf');
+}
+
+
+body{
+    background: linear-gradient(#faedf7,#e8e3fc , #ffffff);
+}
+
+
+div.content-top{
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    font-family: montregular;
+    margin-top: 100px;
+}
+
+span.small{
+    font-size: 16px;
+    background-color: rgb(214, 214, 254);
+    padding: 10px 20px;
+    border-radius: 20px;
+    color: #2f3b80;
+}
+
+span.small i{
+    margin-right: 10px;
+}
+
+span.large{
+    font-family: montbold;
+    font-size: 70px;
+    margin-top: 20px;
+    background: -webkit-linear-gradient(#2f3b80, #ba39ab);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+}
+
+span.text{
+    margin-top: 30px;
+    font-family: montlight;
+    color: #1b1b1b;
+    text-align: center;
+    width: 50%;
+    line-height: 30px;
+}
+
+div.button{
+    margin-top: 50px;
+}
+
+div.button button{
+    background: linear-gradient(to right, #2f3b80, #ba39ab);
+    color: #ffffff;
+    font-size: 18px;
+    font-family: montsemibold;
+    padding: 14px 16px;
+    border-radius: 10px;
+    border: none;
+    transition: .3s;
+}
+
+div.button button:hover{
+    transition: .3s;
+    transform: translateY(-10px);
+    cursor: pointer;
+    box-shadow: 0px 10px 20px #bdbdbd;
+}
+
+
+div.question{
+    font-family: montbold;
+    font-size: 40px;
+    color: #1b1b1b;
+    margin-top: 100px;
+    width: 100%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+div.question span::before{
+    content: "";
+    height: 5px;
+    width: 70px;
+    background-color: rgb(73, 44, 166);
+    margin: auto auto 70px auto;
+    border-radius: 10px;
+    display: block;
+}
+
+div.card-container{
+    display: grid;
+    width: 75%;
+    gap: 30px;
+    margin: 100px auto auto auto;
+    grid-template-columns: 50% 50%;
+    justify-content: center;
+    align-items: center;
+}
+
+div.card{
+    display: flex;
+    flex-direction: column;
+    gap: 20px;
+    background: linear-gradient(to right, #ecefff,#ffe9fc);
+    border-radius: 10px;
+    width: 600px;
+    padding: 20px 20px 30px 50px;
+    justify-content: center;
+    box-shadow: 10px 10px 20px #e9e9e9;
+    border: 1px solid #ffc7f8;
+}
+
+div.card span.title{
+    font-family: montsemibold;
+    font-size: 40px;
+}
+
+div.card span.cont{
+    font-size: 18px;
+    font-family: montregular;
+}
+
+div.card div.icon{
+    background: linear-gradient(45deg, #2f3b80,#ba39ab);
+    color: #ffffff;
+    font-size: 25px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 10px;
+    height: 40px;
+    width: 40px;
+    padding: 10px;
+}
+
+
+
+
+footer{
+    margin-top: 100px;
+    display: flex;
+    gap: 300px;
+    box-shadow: 0px -10px 20px #e9e9e9;
+    padding: 50px 200px;
+}
+
+div.f-left{
+    display: flex;
+    gap: 20px;
+    font-family: montregular;
+    flex-direction: column;
+}
+
+div.f-left span.logo{
+    font-size: 50px;
+    background: -webkit-linear-gradient(#2f3b80, #ba39ab);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    font-family: montbold;
+}
+
+div.f-right{
+    display: flex;
+    flex-direction: column;
+    font-family: montregular;
+    gap: 20px;
+}
+
+div.f-right span.title{
+    font-size: 40px;
+    font-family: montsemibold;
+}
+
+div.f-right ul{
+    list-style-type: none;
+    font-size: 18px;
+    line-height: 40px;
+}

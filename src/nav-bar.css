@@ -1,0 +1,58 @@
+@font-face {
+  font-family: 'montbold'; /* Name you will use in CSS */
+  src: url('./assets/fonts/Montserrat-Bold.ttf');
+}
+@font-face {
+  font-family: 'montregular'; /* Name you will use in CSS */
+  src: url('./assets/fonts/Montserrat-Regular.ttf');
+}
+
+
+nav{
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    box-shadow: 0px 5px 10px rgb(209, 209, 209);
+    padding: 20px;
+    background-color: #ffffff;
+    font-family: montregular;
+}
+
+nav div.logo{
+    width: 50%;
+}
+
+nav div.logo span{
+    font-size: 30px;
+    background: -webkit-linear-gradient(#b83cc4, #3c176b);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    font-family: montbold;
+}
+
+nav div.nav-links ul{
+    display: flex;
+    gap: 50px;
+    list-style-type: none;
+    color: #3b3b3b;
+    justify-content: center;
+    align-items: center;
+}
+
+.login{
+    background: linear-gradient(to right, #9c4dfd,#e345f8);
+    padding: 10px 20px;
+    border-radius: 5px;
+    color: #ffffff;
+    font-family: montsemibold;
+    text-decoration: none;
+    align-self: center;
+    transition: .3s;
+}
+
+.login:hover{
+    background: linear-gradient(45deg,#e345f8, #9c4dfd);
+    transition: .3s;
+    box-shadow: 2px 2px 5px #c6c6c6;
+    
+}

@@ -1,0 +1,132 @@
+*{
+    margin: 0;
+    padding: 0;
+}
+
+@font-face {
+  font-family: 'montbold'; /* Name you will use in CSS */
+  src: url('./assets/fonts/Montserrat-Bold.ttf');
+}
+
+@font-face {
+  font-family: 'montsemibold'; /* Name you will use in CSS */
+  src: url('./assets/fonts/Montserrat-SemiBold.ttf');
+}
+
+@font-face {
+  font-family: 'montregular'; /* Name you will use in CSS */
+  src: url('./assets/fonts/Montserrat-Regular.ttf');
+}
+
+.form-container {
+  background-image: url('./assets/images/login-bg.jpg'); /* adjust path */
+  background-size: cover;
+  background-position: center;
+  height: 100vh;
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+}
+
+span.title{
+    font-family: montbold;
+    background: -webkit-linear-gradient(#b83cc4, #3c176b);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    font-size: 62px;
+}
+
+span.sub-title{
+    font-family: montregular;
+    background: -webkit-linear-gradient(#830f8d, #230e3f);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    font-size: 22px;
+    margin-bottom: 50px;
+}
+
+/* Actual form box */
+
+/* .formbox{
+    padding: 20px;
+    background: linear-gradient(45deg,rgba(255, 255, 255,0.6),rgba(255, 255, 255,0.3));
+    -webkit-backdrop-filter: blur(10px);
+    backdrop-filter: blur(10px);
+    border: 2px solid transparent;
+    border-image: linear-gradient(45deg, rgb(255, 255, 255), rgb(228, 228, 228));
+    border-image-slice: 1;
+    border-radius: 20px;
+
+} */
+
+
+.formbox {
+    position: relative;
+    font-family: montregular;
+    padding: 30px;
+    border-radius: 10px;
+    background: rgba(255, 255, 255, 0.35);
+    -webkit-backdrop-filter: blur(10px);
+    backdrop-filter: blur(10px);
+    font-size: 18px;
+    overflow: hidden; /* ensures inner blur doesn't exceed edges */
+}
+
+/* Gradient border using pseudo-element */
+.formbox::before {
+    content: '';
+    position: absolute;
+    top: -2px; left: -2px; bottom: -2px; right: -2px; /* covers outside the div */
+    border-radius: inherit; /* match parent border radius */
+    padding: 3px; /* thickness of border */
+    background: linear-gradient(45deg, #ffffff, #eaeaea);
+    -webkit-mask: 
+        linear-gradient(#fff 0 0) content-box, 
+        linear-gradient(#fff 0 0);
+    -webkit-mask-composite: destination-out;
+    mask-composite: exclude;
+    pointer-events: none; /* don't block clicks */
+}
+
+
+input.writable{
+    height: 30px;
+    width: 400px;
+    border: 1px solid #d8d8d8;
+    border-radius: 5px;
+    margin: 10px auto 10px auto;
+    padding: 10px;
+    font-size: 16px;
+}
+
+input.submit{
+    height: 50px;
+    width: 100px;
+    border-radius: 5px;
+    font-size: 16px;
+    margin-top: 10px;
+    background: linear-gradient(to right, #dfbef8,#fcc4ff);
+    box-shadow: 5px 5px 10px #cecece;
+    border: 1px solid rgb(190, 188, 188);
+    align-self: center;
+    
+}
+
+
+button.submit{
+    font-family: montregular;
+    font-size: 14px;
+    margin: auto;
+    border: none;
+    background: transparent;
+    margin-top: 20px;
+    text-decoration: underline;
+    color: #525252;
+}
+
+button.submit:hover{
+    color: #3c176b;
+    cursor: pointer;
+}
