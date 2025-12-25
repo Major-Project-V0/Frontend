@@ -1,9 +1,11 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
+import { useNavigate } from 'react-router-dom'
 import axios from 'axios'
 import './interview.css'
 import Navbar from './nav-bar.jsx';
 
 function Interview() {
+  const navigate = useNavigate();
   const [count, setCount] = useState(0)
   const [interview, setInterview] = useState({});
   const [isRecording, setIsRecording] = useState(false);
@@ -27,6 +29,15 @@ function Interview() {
   const recordedChunksRef = useRef([]);
   const detectionIntervalRef = useRef(null);
   const canvasRef = useRef(null);
+
+  // Check authentication on mount - redirect to login if not authenticated
+  useEffect(() => {
+    const token = localStorage.getItem('token');
+    if (!token || token.trim() === '') {
+      console.log('No token found, redirecting to login');
+      navigate('/login');
+    }
+  }, [navigate]);
 
   // Generate session ID on mount
   useEffect(() => {

@@ -1,8 +1,59 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import './nav-bar.css'; 
-import { Link } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 
 function Navbar() {
+  const [isAuthenticated, setIsAuthenticated] = useState(false);
+  const [showLogoutMessage, setShowLogoutMessage] = useState(false);
+  const navigate = useNavigate();
+
+  // Check authentication status
+  useEffect(() => {
+    const checkAuth = () => {
+      const token = localStorage.getItem('token');
+      setIsAuthenticated(!!token && token.trim() !== '');
+    };
+
+    // Check on mount
+    checkAuth();
+    
+    // Listen for storage changes (in case user logs in/out in another tab)
+    window.addEventListener('storage', checkAuth);
+    
+    // Also check on focus (when user switches back to tab)
+    window.addEventListener('focus', checkAuth);
+
+    // Listen for custom event when login/logout happens in same tab
+    window.addEventListener('authChange', checkAuth);
+
+    return () => {
+      window.removeEventListener('storage', checkAuth);
+      window.removeEventListener('focus', checkAuth);
+      window.removeEventListener('authChange', checkAuth);
+    };
+  }, []);
+
+  const handleLogout = () => {
+    // Clear tokens
+    localStorage.removeItem('token');
+    localStorage.removeItem('refreshToken');
+    setIsAuthenticated(false);
+    
+    // Dispatch custom event to notify other components
+    window.dispatchEvent(new Event('authChange'));
+    
+    // Show success message
+    setShowLogoutMessage(true);
+    
+    // Hide message after 3 seconds
+    setTimeout(() => {
+      setShowLogoutMessage(false);
+    }, 3000);
+    
+    // Redirect to home page
+    navigate('/');
+  };
+
   return (
     <nav>
       <div className="logo">
@@ -13,9 +64,24 @@ function Navbar() {
         <ul>
           <li>Home</li>
           <li>Prepare</li>
-          <li><Link to='/login' className='login'>Login</Link></li>
+          <li>
+            {isAuthenticated ? (
+              <button onClick={handleLogout} className='login logout-btn'>
+                Logout
+              </button>
+            ) : (
+              <Link to='/login' className='login'>Login</Link>
+            )}
+          </li>
         </ul>
       </div>
+
+      {/* Logout success message */}
+      {showLogoutMessage && (
+        <div className="logout-message">
+          Successfully logged out
+        </div>
+      )}
     </nav>
   );
 }

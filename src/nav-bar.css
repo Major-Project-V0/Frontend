@@ -56,3 +56,48 @@ nav div.nav-links ul{
     box-shadow: 2px 2px 5px #c6c6c6;
     
 }
+
+.logout-btn {
+    background: linear-gradient(to right, #9c4dfd,#e345f8);
+    padding: 10px 20px;
+    border-radius: 5px;
+    color: #ffffff;
+    font-family: montsemibold;
+    text-decoration: none;
+    align-self: center;
+    transition: .3s;
+    border: none;
+    cursor: pointer;
+    font-size: inherit;
+}
+
+.logout-btn:hover {
+    background: linear-gradient(45deg,#e345f8, #9c4dfd);
+    transition: .3s;
+    box-shadow: 2px 2px 5px #c6c6c6;
+}
+
+.logout-message {
+    position: fixed;
+    top: 80px;
+    right: 20px;
+    background: linear-gradient(to right, #4caf50, #45a049);
+    color: white;
+    padding: 15px 25px;
+    border-radius: 5px;
+    box-shadow: 0px 4px 10px rgba(0, 0, 0, 0.2);
+    z-index: 1000;
+    font-family: montregular;
+    animation: slideIn 0.3s ease-out;
+}
+
+@keyframes slideIn {
+    from {
+        transform: translateX(100%);
+        opacity: 0;
+    }
+    to {
+        transform: translateX(0);
+        opacity: 1;
+    }
+}

@@ -62,7 +62,7 @@ function Login() {
   useEffect(() => {
     const verifyToken = async () => {
       const token = localStorage.getItem('token');
-      if (token) {
+      if (token && token.trim() !== '') {
         try {
           // Optional: Add token verification endpoint if available
           setIsAuthenticated(true);
@@ -103,10 +103,35 @@ function Login() {
         }
       });
 
-      localStorage.setItem('token', response.data.token);
+      // After successful registration, automatically log in the user
+      // by calling the login endpoint
+      try {
+        const loginResponse = await axios.post('http://localhost:8000/api/accounts/login/', {
+          username: formData.username,
+          password: formData.password
+        }, {
+          headers: {
+            'Content-Type': 'application/json',
+          }
+        });
+
+        const accessToken = loginResponse.data.access;
+        const refreshToken = loginResponse.data.refresh;
+        if (accessToken) {
+          localStorage.setItem('token', accessToken);
+          localStorage.setItem('refreshToken', refreshToken);
+        }
+        setIsAuthenticated(true);
+        // Notify navbar of auth change
+        window.dispatchEvent(new Event('authChange'));
+        navigate('/interview', { replace: true }); // Replace login page in history
+      } catch (loginErr) {
+        // Registration succeeded but auto-login failed
+        setError('Registration successful. Please log in.');
+        setIsLogin(true); // Switch to login form
+      }
+      
       setFormData({ username: '', email: '', password: '', password2: '' });
-      setIsAuthenticated(true);
-      navigate('/interview'); // Redirect to interview route
     } catch (err) {
       setError(err.response?.data?.message || 'Registration failed');
     } finally {
@@ -129,10 +154,18 @@ function Login() {
         }
       });
 
-      localStorage.setItem('token', response.data.token);
+      // TokenObtainPairView returns 'access' and 'refresh' tokens
+      const accessToken = response.data.access;
+      const refreshToken = response.data.refresh;
+      if (accessToken) {
+        localStorage.setItem('token', accessToken);
+        localStorage.setItem('refreshToken', refreshToken);
+      }
       setFormData({ username: '', email: '', password: '', password2: '' });
       setIsAuthenticated(true);
-      navigate('/interview'); // Redirect to interview route
+      // Notify navbar of auth change
+      window.dispatchEvent(new Event('authChange'));
+      navigate('/interview', { replace: true }); // Replace login page in history
     } catch (err) {
       setError(err.response?.data?.message || 'Login failed');
     } finally {
@@ -152,11 +185,7 @@ function Login() {
 
   return (
     <div className="form-container" style={{ backgroundImage: `url(${backgrnd})` }}>
-      {isAuthenticated ? (
-        <div className="formbox">
-          <span className="title">MockiT Dashboard</span>
-        </div>
-      ) : (
+      {!isAuthenticated && (
         <>
           <span className="title">MockiT</span>
           <span className="sub-title">

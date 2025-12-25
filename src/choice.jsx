@@ -45,7 +45,28 @@ function Choice() {
   ];
 
   const handleCardClick = (option) => {
-    navigate('/interview');
+    // Check if user is logged in - verify token exists and is not empty
+    const token = localStorage.getItem('token');
+    
+    // More robust check: token must exist, not be null, not be undefined, and not be empty string
+    const isAuthenticated = token !== null && token !== undefined && token.trim() !== '';
+    
+    console.log('Authentication check:', { 
+      token, 
+      isAuthenticated, 
+      tokenType: typeof token,
+      tokenLength: token?.length 
+    });
+    
+    if (isAuthenticated) {
+      console.log('User is logged in, navigating to interview');
+      // User is logged in, navigate to interview
+      navigate('/interview');
+    } else {
+      console.log('User is NOT logged in, navigating to login');
+      // User is not logged in, navigate to login
+      navigate('/login');
+    }
   };
 
   return (
