@@ -22,6 +22,16 @@ function Interview() {
   const [sessionId, setSessionId] = useState(null);
   const [isDetecting, setIsDetecting] = useState(false);
   
+  // Speaker detection state
+  const [speakerStatus, setSpeakerStatus] = useState(null); // 'single', 'multiple', or null
+  const [speakerConfidence, setSpeakerConfidence] = useState(null);
+  const [hasSpeech, setHasSpeech] = useState(false);
+  
+  // Emotion detection state
+  const [dominantEmotion, setDominantEmotion] = useState(null);
+  const [emotionProbabilities, setEmotionProbabilities] = useState(null);
+  const [emotionConfidence, setEmotionConfidence] = useState(null);
+  
   // Refs for video elements
   const videoRef = useRef(null);
   const streamRef = useRef(null);
@@ -29,6 +39,13 @@ function Interview() {
   const recordedChunksRef = useRef([]);
   const detectionIntervalRef = useRef(null);
   const canvasRef = useRef(null);
+  
+  // Audio processing refs
+  const audioContextRef = useRef(null);
+  const audioProcessorRef = useRef(null);
+  const audioIntervalRef = useRef(null);
+  const audioChunksRef = useRef([]);
+  const emotionCounterRef = useRef(0);
 
   // Check authentication on mount - redirect to login if not authenticated
   useEffect(() => {
@@ -69,6 +86,188 @@ function Interview() {
     // Convert to base64
     return canvas.toDataURL('image/jpeg', 0.8);
   };
+
+  // Function to capture audio chunk using MediaRecorder (for speaker detection - shorter)
+  const captureAudioChunk = useCallback(async () => {
+    if (!streamRef.current || !micEnabled) {
+      return null;
+    }
+
+    try {
+      const audioTracks = streamRef.current.getAudioTracks();
+      if (audioTracks.length === 0 || !audioTracks[0].enabled) {
+        return null;
+      }
+
+      // Create a new MediaRecorder for this chunk
+      const audioStream = new MediaStream([audioTracks[0]]);
+      const recorder = new MediaRecorder(audioStream, {
+        mimeType: 'audio/webm;codecs=opus'
+      });
+
+      return new Promise((resolve) => {
+        const chunks = [];
+        
+        recorder.ondataavailable = (event) => {
+          if (event.data.size > 0) {
+            chunks.push(event.data);
+          }
+        };
+
+        recorder.onstop = () => {
+          const blob = new Blob(chunks, { type: 'audio/webm' });
+          const reader = new FileReader();
+          
+          reader.onloadend = () => {
+            const base64 = reader.result.split(',')[1];
+            resolve(base64);
+          };
+          
+          reader.readAsDataURL(blob);
+        };
+
+        // Record for 0.5 seconds (for speaker detection)
+        recorder.start();
+        setTimeout(() => {
+          recorder.stop();
+        }, 500);
+      });
+    } catch (err) {
+      console.error('Error capturing audio:', err);
+      return null;
+    }
+  }, [micEnabled]);
+
+  // Function to capture longer audio chunk for emotion detection (1.5 seconds)
+  const captureAudioChunkForEmotion = useCallback(async () => {
+    if (!streamRef.current || !micEnabled) {
+      return null;
+    }
+
+    try {
+      const audioTracks = streamRef.current.getAudioTracks();
+      if (audioTracks.length === 0 || !audioTracks[0].enabled) {
+        return null;
+      }
+
+      // Create a new MediaRecorder for this chunk
+      const audioStream = new MediaStream([audioTracks[0]]);
+      const recorder = new MediaRecorder(audioStream, {
+        mimeType: 'audio/webm;codecs=opus'
+      });
+
+      return new Promise((resolve) => {
+        const chunks = [];
+        
+        recorder.ondataavailable = (event) => {
+          if (event.data.size > 0) {
+            chunks.push(event.data);
+          }
+        };
+
+        recorder.onstop = () => {
+          const blob = new Blob(chunks, { type: 'audio/webm' });
+          const reader = new FileReader();
+          
+          reader.onloadend = () => {
+            const base64 = reader.result.split(',')[1];
+            resolve(base64);
+          };
+          
+          reader.readAsDataURL(blob);
+        };
+
+        // Record for 1.5 seconds (for emotion detection - model needs 1.3s)
+        recorder.start();
+        setTimeout(() => {
+          recorder.stop();
+        }, 1500);
+      });
+    } catch (err) {
+      console.error('Error capturing audio for emotion:', err);
+      return null;
+    }
+  }, [micEnabled]);
+
+  // Function to send audio chunk to backend for speaker detection
+  const sendAudioForDetection = useCallback(async (audioBase64) => {
+    if (!audioBase64 || !micEnabled) {
+      return;
+    }
+
+    try {
+      const response = await axios.post('http://localhost:8000/api/detections/speakers/', {
+        audio: audioBase64,
+        session_id: sessionId,
+        sampling_rate: 16000
+      }, {
+        headers: {
+          'Content-Type': 'application/json',
+        }
+      });
+
+      if (response.data.success) {
+        const result = response.data;
+        console.log('Speaker detection result:', result);
+        setHasSpeech(result.has_speech);
+        
+        if (result.has_speech) {
+          setSpeakerStatus(result.is_multiple_speakers ? 'multiple' : 'single');
+          setSpeakerConfidence(result.confidence);
+        } else {
+          setSpeakerStatus(null);
+          setSpeakerConfidence(null);
+        }
+      }
+    } catch (err) {
+      console.error('Speaker detection error:', err);
+      console.error('Error details:', err.response?.data || err.message);
+      // Don't show error to user for every failed detection
+    }
+  }, [micEnabled, sessionId]);
+
+  // Function to send audio chunk to backend for emotion detection
+  const sendAudioForEmotionDetection = useCallback(async (audioBase64) => {
+    if (!audioBase64 || !micEnabled) {
+      return;
+    }
+
+    try {
+      console.log('Sending audio for emotion detection...');
+      const response = await axios.post('http://localhost:8000/api/detections/emotion/', {
+        audio: audioBase64,
+        session_id: sessionId,
+        sampling_rate: 16000
+      }, {
+        headers: {
+          'Content-Type': 'application/json',
+        }
+      });
+
+      if (response.data.success) {
+        const result = response.data;
+        console.log('Emotion detection result:', result);
+        // Update emotion if we got a valid result (even if neutral, but with reasonable confidence)
+        if (result.dominant_emotion) {
+          // Only filter out very low confidence predictions
+          if (result.confidence > 0.2) {
+            setDominantEmotion(result.dominant_emotion);
+            setEmotionProbabilities(result.emotion_probabilities);
+            setEmotionConfidence(result.confidence);
+          } else {
+            // Low confidence - clear emotion
+            setDominantEmotion(null);
+            setEmotionProbabilities(null);
+            setEmotionConfidence(null);
+          }
+        }
+      }
+    } catch (err) {
+      console.error('Emotion detection error:', err);
+      console.error('Error details:', err.response?.data || err.message);
+      // Don't show error to user for every failed detection
+    }
+  }, [micEnabled, sessionId]);
 
   // Function to send frame to backend for detection
   const sendFrameForDetection = useCallback(async () => {
@@ -256,9 +455,16 @@ function Interview() {
         console.log('Cleaning up media streams');
         streamRef.current.getTracks().forEach(track => track.stop());
       }
-      // Clear detection interval
+      // Clear detection intervals
       if (detectionIntervalRef.current) {
         clearInterval(detectionIntervalRef.current);
+      }
+      if (audioIntervalRef.current) {
+        clearInterval(audioIntervalRef.current);
+      }
+      // Cleanup audio context
+      if (audioContextRef.current) {
+        audioContextRef.current.close().catch(console.error);
       }
     };
   }, []);
@@ -326,6 +532,67 @@ function Interview() {
     }
   }, [cameraEnabled, streamReady, mediaInitialized, sendFrameForDetection]);
 
+  // Effect to start/stop continuous audio detection based on mic status
+  useEffect(() => {
+    // Start audio detection when mic is enabled and stream is ready
+    if (micEnabled && streamReady && mediaInitialized) {
+      console.log('Starting continuous audio detection...');
+      
+      // Clear any existing interval
+      if (audioIntervalRef.current) {
+        clearInterval(audioIntervalRef.current);
+      }
+      
+      // Reset emotion counter
+      emotionCounterRef.current = 0;
+      
+      // Start audio detection interval (every 0.5 seconds for speaker, 1.5 seconds for emotion)
+      audioIntervalRef.current = setInterval(async () => {
+        // Always capture short chunk for speaker detection
+        const audioBase64 = await captureAudioChunk();
+        if (audioBase64) {
+          console.log('Sending audio for speaker detection...');
+          sendAudioForDetection(audioBase64);
+        }
+        
+        // Capture longer chunk for emotion detection every 3rd iteration (every 1.5 seconds)
+        emotionCounterRef.current++;
+        if (emotionCounterRef.current >= 3) {
+          emotionCounterRef.current = 0;
+          console.log('Capturing audio for emotion detection...');
+          const emotionAudioBase64 = await captureAudioChunkForEmotion();
+          if (emotionAudioBase64) {
+            sendAudioForEmotionDetection(emotionAudioBase64);
+          } else {
+            console.log('Failed to capture audio for emotion detection');
+          }
+        }
+      }, 500);
+      
+      // Cleanup function
+      return () => {
+        if (audioIntervalRef.current) {
+          console.log('Stopping continuous audio detection...');
+          clearInterval(audioIntervalRef.current);
+          audioIntervalRef.current = null;
+        }
+      };
+    } else {
+      // Stop audio detection if mic is disabled
+      if (audioIntervalRef.current) {
+        clearInterval(audioIntervalRef.current);
+        audioIntervalRef.current = null;
+      }
+      // Reset speaker and emotion status when mic is disabled
+      setSpeakerStatus(null);
+      setSpeakerConfidence(null);
+      setHasSpeech(false);
+      setDominantEmotion(null);
+      setEmotionProbabilities(null);
+      setEmotionConfidence(null);
+    }
+      }, [micEnabled, streamReady, mediaInitialized, captureAudioChunk, captureAudioChunkForEmotion, sendAudioForDetection, sendAudioForEmotionDetection]);
+
   console.log('Current state:', {
     mediaInitialized,
     cameraEnabled,
@@ -355,7 +622,7 @@ function Interview() {
           <div className="bar"></div>
         </div>
         {/* Detection Summary */}
-        {(postureLabel || (mediaInitialized && cameraEnabled)) && (
+        {(postureLabel || (mediaInitialized && cameraEnabled) || (mediaInitialized && micEnabled && (speakerStatus !== null || dominantEmotion))) && (
           <div style={{
             marginTop: '15px',
             padding: '12px',
@@ -407,6 +674,55 @@ function Interview() {
                   {faceCount === 0 ? 'NO FACE' : 
                    faceCount === 1 ? 'SINGLE FACE ✓' : 
                    `${faceCount} FACES - WARNING!`}
+                </span>
+              </div>
+            )}
+            {mediaInitialized && micEnabled && speakerStatus !== null && (
+              <div style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: '8px'
+              }}>
+                <span style={{ fontSize: '12px', color: '#7f8c8d', fontWeight: '500' }}>Speaker Detection:</span>
+                <span style={{
+                  padding: '4px 12px',
+                  borderRadius: '12px',
+                  fontSize: '13px',
+                  fontWeight: 'bold',
+                  color: 'white',
+                  background: speakerStatus === 'multiple' ? '#ff4757' : 
+                             speakerStatus === 'single' ? '#2ecc71' : 
+                             '#95a5a6'
+                }}>
+                  {speakerStatus === 'multiple' ? '🚨 MULTIPLE SPEAKERS' : 
+                   speakerStatus === 'single' ? '🟢 SINGLE SPEAKER' : 
+                   '🔇 NO SPEECH'}
+                </span>
+              </div>
+            )}
+            {mediaInitialized && micEnabled && dominantEmotion && (
+              <div style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: '8px'
+              }}>
+                <span style={{ fontSize: '12px', color: '#7f8c8d', fontWeight: '500' }}>Emotion:</span>
+                <span style={{
+                  padding: '4px 12px',
+                  borderRadius: '12px',
+                  fontSize: '13px',
+                  fontWeight: 'bold',
+                  color: 'white',
+                  background: dominantEmotion === 'happy' ? '#2ecc71' :
+                             dominantEmotion === 'angry' ? '#ff4757' :
+                             dominantEmotion === 'sad' ? '#3498db' :
+                             dominantEmotion === 'fear' ? '#9b59b6' :
+                             dominantEmotion === 'surprise' ? '#f39c12' :
+                             dominantEmotion === 'disgust' ? '#e67e22' :
+                             '#95a5a6'
+                }}>
+                  {dominantEmotion.toUpperCase()}
+                  {emotionConfidence && ` (${(emotionConfidence * 100).toFixed(0)}%)`}
                 </span>
               </div>
             )}
@@ -532,6 +848,115 @@ function Interview() {
                   {faceCount === 0 && (
                     <div style={{ fontSize: '12px', opacity: 0.9, marginTop: '4px', fontWeight: 'normal' }}>
                       Please position yourself in front of camera
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+
+            {/* Detection results overlay - Emotion Detection */}
+            {mediaInitialized && micEnabled && dominantEmotion && (
+              <div className="detection-results-emotion" style={{
+                position: 'absolute',
+                bottom: speakerStatus !== null ? '180px' : '100px',
+                right: '20px',
+                background: dominantEmotion === 'happy' ? 'rgba(46, 213, 115, 0.9)' :
+                           dominantEmotion === 'angry' ? 'rgba(255, 71, 87, 0.9)' :
+                           dominantEmotion === 'sad' ? 'rgba(52, 152, 219, 0.9)' :
+                           dominantEmotion === 'fear' ? 'rgba(155, 89, 182, 0.9)' :
+                           dominantEmotion === 'surprise' ? 'rgba(243, 156, 18, 0.9)' :
+                           dominantEmotion === 'disgust' ? 'rgba(230, 126, 34, 0.9)' :
+                           'rgba(149, 165, 166, 0.9)',
+                color: 'white',
+                padding: '12px 20px',
+                borderRadius: '8px',
+                zIndex: 10,
+                fontSize: '16px',
+                fontWeight: 'bold',
+                boxShadow: '0 4px 6px rgba(0, 0, 0, 0.3)',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '10px',
+                minWidth: '200px'
+              }}>
+                <i className={`fa ${
+                  dominantEmotion === 'happy' ? 'fa-smile' :
+                  dominantEmotion === 'angry' ? 'fa-angry' :
+                  dominantEmotion === 'sad' ? 'fa-sad-tear' :
+                  dominantEmotion === 'fear' ? 'fa-surprise' :
+                  dominantEmotion === 'surprise' ? 'fa-surprise' :
+                  dominantEmotion === 'disgust' ? 'fa-grimace' :
+                  'fa-meh'
+                }`} style={{ fontSize: '20px' }}></i>
+                <div>
+                  <div style={{ fontSize: '12px', opacity: 0.9, marginBottom: '2px' }}>EMOTION DETECTED</div>
+                  <div style={{ textTransform: 'uppercase', letterSpacing: '1px' }}>
+                    {dominantEmotion}
+                  </div>
+                  {emotionConfidence && (
+                    <div style={{ fontSize: '12px', opacity: 0.9, marginTop: '4px' }}>
+                      Confidence: {(emotionConfidence * 100).toFixed(1)}%
+                    </div>
+                  )}
+                  {emotionProbabilities && (
+                    <div style={{ fontSize: '10px', opacity: 0.8, marginTop: '6px', maxHeight: '60px', overflowY: 'auto' }}>
+                      {Object.entries(emotionProbabilities)
+                        .sort((a, b) => b[1] - a[1])
+                        .slice(0, 3)
+                        .map(([emotion, prob]) => (
+                          <div key={emotion} style={{ marginTop: '2px' }}>
+                            {emotion}: {(prob * 100).toFixed(1)}%
+                          </div>
+                        ))}
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+
+            {/* Detection results overlay - Speaker Detection */}
+            {mediaInitialized && micEnabled && speakerStatus !== null && (
+              <div className="detection-results-speakers" style={{
+                position: 'absolute',
+                bottom: '100px',
+                right: '20px',
+                background: speakerStatus === 'multiple' ? 'rgba(255, 71, 87, 0.9)' :
+                           speakerStatus === 'single' ? 'rgba(46, 213, 115, 0.9)' : 
+                           'rgba(149, 165, 166, 0.9)',
+                color: 'white',
+                padding: '12px 20px',
+                borderRadius: '8px',
+                zIndex: 10,
+                fontSize: '16px',
+                fontWeight: 'bold',
+                boxShadow: '0 4px 6px rgba(0, 0, 0, 0.3)',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '10px',
+                animation: speakerStatus === 'multiple' ? 'pulse 2s infinite' : 'none'
+              }}>
+                <i className={`fa ${speakerStatus === 'multiple' ? 'fa-exclamation-triangle' :
+                               speakerStatus === 'single' ? 'fa-microphone' : 
+                               'fa-microphone-slash'}`} 
+                   style={{ fontSize: '20px' }}></i>
+                <div>
+                  <div style={{ fontSize: '12px', opacity: 0.9, marginBottom: '2px' }}>SPEAKER DETECTION</div>
+                  <div style={{ textTransform: 'uppercase', letterSpacing: '1px' }}>
+                    {speakerStatus === 'multiple' ? '🚨 Multiple Speakers!' : 
+                     speakerStatus === 'single' ? '🟢 Single Speaker ✓' : 
+                     '🔇 No Speech'}
+                  </div>
+                  {speakerStatus === 'multiple' && (
+                    <div style={{ fontSize: '12px', opacity: 0.9, marginTop: '4px', fontWeight: 'normal' }}>
+                      Multiple voices detected - Possible cheating!
+                      {speakerConfidence && (
+                        <span> (Confidence: {(speakerConfidence * 100).toFixed(1)}%)</span>
+                      )}
+                    </div>
+                  )}
+                  {speakerStatus === 'single' && speakerConfidence && (
+                    <div style={{ fontSize: '12px', opacity: 0.9, marginTop: '4px', fontWeight: 'normal' }}>
+                      Confidence: {(speakerConfidence * 100).toFixed(1)}%
                     </div>
                   )}
                 </div>
