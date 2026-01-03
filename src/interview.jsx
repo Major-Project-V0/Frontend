@@ -247,20 +247,18 @@ function Interview() {
       if (response.data.success) {
         const result = response.data;
         console.log('Emotion detection result:', result);
-        // Update emotion if we got a valid result (even if neutral, but with reasonable confidence)
+        // Always update emotion state if we got a valid result from backend
+        // Backend already filters low confidence results, so trust its output
         if (result.dominant_emotion) {
-          // Only filter out very low confidence predictions
-          if (result.confidence > 0.2) {
-            setDominantEmotion(result.dominant_emotion);
-            setEmotionProbabilities(result.emotion_probabilities);
-            setEmotionConfidence(result.confidence);
-          } else {
-            // Low confidence - clear emotion
-            setDominantEmotion(null);
-            setEmotionProbabilities(null);
-            setEmotionConfidence(null);
-          }
+          console.log('✅ Setting emotion state:', result.dominant_emotion, 'confidence:', result.confidence);
+          setDominantEmotion(result.dominant_emotion);
+          setEmotionProbabilities(result.emotion_probabilities || {});
+          setEmotionConfidence(result.confidence || 0);
+        } else {
+          console.log('No dominant emotion in result');
         }
+      } else {
+        console.log('Emotion detection API returned success: false');
       }
     } catch (err) {
       console.error('Emotion detection error:', err);
@@ -598,8 +596,19 @@ function Interview() {
     cameraEnabled,
     micEnabled,
     streamReady,
-    hasStream: !!streamRef.current
+    hasStream: !!streamRef.current,
+    dominantEmotion,
+    emotionConfidence
   });
+
+  // Debug effect to log emotion state changes
+  useEffect(() => {
+    if (dominantEmotion) {
+      console.log('✅ Emotion state updated - Displaying:', dominantEmotion, 'Confidence:', emotionConfidence);
+    } else {
+      console.log('❌ No emotion detected or cleared');
+    }
+  }, [dominantEmotion, emotionConfidence]);
 
   return (
     <>
@@ -719,6 +728,7 @@ function Interview() {
                              dominantEmotion === 'fear' ? '#9b59b6' :
                              dominantEmotion === 'surprise' ? '#f39c12' :
                              dominantEmotion === 'disgust' ? '#e67e22' :
+                             dominantEmotion === 'neutral' ? '#7f8c8d' :
                              '#95a5a6'
                 }}>
                   {dominantEmotion.toUpperCase()}
@@ -756,7 +766,7 @@ function Interview() {
                 <i className="fa fa-circle" aria-hidden="true"></i>
               </div>
               <div>
-                Python bhanne sarpa kun jungle ma paincha?
+              
               </div>
             </div>
           </div>
@@ -866,6 +876,7 @@ function Interview() {
                            dominantEmotion === 'fear' ? 'rgba(155, 89, 182, 0.9)' :
                            dominantEmotion === 'surprise' ? 'rgba(243, 156, 18, 0.9)' :
                            dominantEmotion === 'disgust' ? 'rgba(230, 126, 34, 0.9)' :
+                           dominantEmotion === 'neutral' ? 'rgba(127, 140, 141, 0.9)' :
                            'rgba(149, 165, 166, 0.9)',
                 color: 'white',
                 padding: '12px 20px',
@@ -886,6 +897,7 @@ function Interview() {
                   dominantEmotion === 'fear' ? 'fa-surprise' :
                   dominantEmotion === 'surprise' ? 'fa-surprise' :
                   dominantEmotion === 'disgust' ? 'fa-grimace' :
+                  dominantEmotion === 'neutral' ? 'fa-meh' :
                   'fa-meh'
                 }`} style={{ fontSize: '20px' }}></i>
                 <div>

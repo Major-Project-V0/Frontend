@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import Navbar from './nav-bar.jsx';
 import './choice.css';
+import { generateInterviewQuestions } from './services/geminiService';
 
 function Choice() {
   const navigate = useNavigate();
@@ -14,6 +15,8 @@ function Choice() {
   });
   
   const [errors, setErrors] = useState({});
+  const [isGenerating, setIsGenerating] = useState(false);
+  const [generationError, setGenerationError] = useState(null);
 
   // IT Sector Job Roles
   const jobRoles = [
@@ -99,7 +102,7 @@ function Choice() {
     return Object.keys(newErrors).length === 0;
   };
 
-  const handleSubmit = (e) => {
+  const handleSubmit = async (e) => {
     e.preventDefault();
     
     if (!validateForm()) {
@@ -110,16 +113,48 @@ function Choice() {
     const token = localStorage.getItem('token');
     const isAuthenticated = token !== null && token !== undefined && token.trim() !== '';
 
-    if (isAuthenticated) {
-      // Store form data in localStorage for use in interview
-      localStorage.setItem('candidateInfo', JSON.stringify(formData));
-      // Navigate to interview
-      navigate('/interview');
-    } else {
-      // Store form data in localStorage for after login
-      localStorage.setItem('candidateInfo', JSON.stringify(formData));
-      // Navigate to login
-      navigate('/login');
+    // Generate session ID
+    const sessionId = 'session_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
+
+    // Store form data in localStorage
+    const candidateInfo = {
+      ...formData,
+      sessionId: sessionId
+    };
+    localStorage.setItem('candidateInfo', JSON.stringify(candidateInfo));
+
+    // Generate interview questions using Gemini
+    setIsGenerating(true);
+    setGenerationError(null);
+
+    try {
+      const candidateName = `${formData.firstName} ${formData.lastName}`;
+      const result = await generateInterviewQuestions({
+        jobRole: formData.preferredJobRole,
+        yearsOfExperience: formData.yearsOfExperience,
+        candidateName: candidateName,
+        sessionId: sessionId
+      });
+
+      if (result.success) {
+        // Store generated questions
+        localStorage.setItem('generatedQuestions', JSON.stringify(result.data.questions));
+        localStorage.setItem('questionSessionId', sessionId);
+        
+        // Navigate based on authentication
+        if (isAuthenticated) {
+          navigate('/interview');
+        } else {
+          navigate('/login');
+        }
+      } else {
+        setGenerationError(result.error || 'Failed to generate questions. Please try again.');
+        setIsGenerating(false);
+      }
+    } catch (error) {
+      console.error('Error generating questions:', error);
+      setGenerationError('An error occurred while generating questions. Please try again.');
+      setIsGenerating(false);
     }
   };
 
@@ -207,9 +242,35 @@ function Choice() {
               {errors.yearsOfExperience && <span className="error-message">{errors.yearsOfExperience}</span>}
             </div>
 
+            {/* Error Message */}
+            {generationError && (
+              <div className="error-message" style={{ 
+                marginBottom: '15px', 
+                padding: '12px', 
+                background: '#fee', 
+                border: '1px solid #fcc',
+                borderRadius: '4px',
+                color: '#c33'
+              }}>
+                {generationError}
+              </div>
+            )}
+
             {/* Submit Button */}
-            <button type="submit" className="submit-btn">
-              Continue to Interview <i className="fa fa-arrow-right" aria-hidden="true"></i>
+            <button 
+              type="submit" 
+              className="submit-btn"
+              disabled={isGenerating}
+            >
+              {isGenerating ? (
+                <>
+                  <i className="fa fa-spinner fa-spin" aria-hidden="true"></i> Generating Questions...
+                </>
+              ) : (
+                <>
+                  Continue to Interview <i className="fa fa-arrow-right" aria-hidden="true"></i>
+                </>
+              )}
             </button>
           </form>
         </div>
