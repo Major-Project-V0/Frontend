@@ -3,6 +3,10 @@ import { useNavigate } from 'react-router-dom'
 import axios from 'axios'
 import './interview.css'
 import Navbar from './nav-bar.jsx';
+import { saveUserResponse, processUserResponse } from './services/geminiService';
+
+// API Base URL
+const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000';
 
 function Interview() {
   const navigate = useNavigate();
@@ -32,6 +36,22 @@ function Interview() {
   const [emotionProbabilities, setEmotionProbabilities] = useState(null);
   const [emotionConfidence, setEmotionConfidence] = useState(null);
   
+  // Interview questions state
+  const [questions, setQuestions] = useState([]);
+  const [idealAnswers, setIdealAnswers] = useState([]);
+  const [currentQuestionIndex, setCurrentQuestionIndex] = useState(0);
+  const [currentQuestion, setCurrentQuestion] = useState(null);
+  const [questionSubtitle, setQuestionSubtitle] = useState('');
+  const [userAnswerSubtitle, setUserAnswerSubtitle] = useState('');
+  const [isSpeaking, setIsSpeaking] = useState(false);
+  const [isListening, setIsListening] = useState(false);
+  const [candidateInfo, setCandidateInfo] = useState(null);
+  
+  // Speech recognition and synthesis refs
+  const recognitionRef = useRef(null);
+  const synthesisRef = useRef(null);
+  const currentAnswerRef = useRef('');
+  
   // Refs for video elements
   const videoRef = useRef(null);
   const streamRef = useRef(null);
@@ -50,10 +70,41 @@ function Interview() {
   // Check authentication on mount - redirect to login if not authenticated
   useEffect(() => {
     const token = localStorage.getItem('token');
-    if (!token || token.trim() === '') {
+    if (!token || token.trim() === '' || token === 'null' || token === 'undefined') {
       console.log('No token found, redirecting to login');
       navigate('/login');
+      return;
     }
+    
+    // Validate token format
+    try {
+      const parts = token.split('.');
+      if (parts.length === 3) {
+        try {
+          const payload = JSON.parse(atob(parts[1]));
+          // Check if token is expired
+          if (payload.exp && payload.exp < Date.now() / 1000) {
+            localStorage.removeItem('token');
+            localStorage.removeItem('refreshToken');
+            navigate('/login');
+            return;
+          }
+          // Token is valid
+          return;
+        } catch (e) {
+          // Invalid payload
+          localStorage.removeItem('token');
+          localStorage.removeItem('refreshToken');
+        }
+      }
+    } catch (e) {
+      // Invalid format
+      localStorage.removeItem('token');
+      localStorage.removeItem('refreshToken');
+    }
+    
+    // Token is invalid
+    navigate('/login');
   }, [navigate]);
 
   // Generate session ID on mount
@@ -61,8 +112,297 @@ function Interview() {
     const generateSessionId = () => {
       return 'session_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
     };
-    setSessionId(generateSessionId());
+    const storedSessionId = localStorage.getItem('questionSessionId');
+    if (storedSessionId) {
+      setSessionId(storedSessionId);
+    } else {
+      const newSessionId = generateSessionId();
+      setSessionId(newSessionId);
+      localStorage.setItem('questionSessionId', newSessionId);
+    }
   }, []);
+
+  // Load questions from localStorage on mount
+  useEffect(() => {
+    const loadQuestions = async () => {
+      try {
+        const storedQuestions = localStorage.getItem('generatedQuestions');
+        const storedCandidateInfo = localStorage.getItem('candidateInfo');
+        const questionSessionId = localStorage.getItem('questionSessionId');
+        
+        if (storedQuestions) {
+          const questionsData = JSON.parse(storedQuestions);
+          
+          // Load ideal answers from localStorage first
+          const storedIdealAnswers = localStorage.getItem('idealAnswers');
+          if (storedIdealAnswers) {
+            try {
+              const idealAnswersData = JSON.parse(storedIdealAnswers);
+              setIdealAnswers(idealAnswersData);
+            } catch (error) {
+              console.error('Error parsing ideal answers:', error);
+            }
+          }
+          
+          // Check if questions are in new format (with question_id) or old format
+          if (questionsData.length > 0 && questionsData[0].question_id) {
+            setQuestions(questionsData);
+          } else {
+            // Old format - convert to new format
+            const convertedQuestions = questionsData.map((q, idx) => ({
+              question_id: `q_${idx}_${Date.now()}`,
+              question: typeof q === 'string' ? q : q.question || ''
+            }));
+            setQuestions(convertedQuestions);
+          }
+          
+          // Set first question
+          if (questionsData.length > 0) {
+            const firstQ = questionsData[0];
+            setCurrentQuestion({
+              question_id: firstQ.question_id || `q_0_${Date.now()}`,
+              question: typeof firstQ === 'string' ? firstQ : firstQ.question || ''
+            });
+            setQuestionSubtitle(typeof firstQ === 'string' ? firstQ : firstQ.question || '');
+          }
+        }
+        
+        if (storedCandidateInfo) {
+          const info = JSON.parse(storedCandidateInfo);
+          setCandidateInfo(info);
+        }
+      } catch (error) {
+        console.error('Error loading questions:', error);
+      }
+    };
+    
+    loadQuestions();
+  }, []);
+
+  // Initialize Speech Recognition and Synthesis
+  useEffect(() => {
+    // Initialize Web Speech API
+    if ('webkitSpeechRecognition' in window || 'SpeechRecognition' in window) {
+      const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+      recognitionRef.current = new SpeechRecognition();
+      recognitionRef.current.continuous = true;
+      recognitionRef.current.interimResults = true;
+      recognitionRef.current.lang = 'en-US';
+      
+      recognitionRef.current.onresult = (event) => {
+        let interimTranscript = '';
+        let finalTranscript = '';
+        
+        for (let i = event.resultIndex; i < event.results.length; i++) {
+          const transcript = event.results[i][0].transcript;
+          if (event.results[i].isFinal) {
+            finalTranscript += transcript + ' ';
+          } else {
+            interimTranscript += transcript;
+          }
+        }
+        
+        const fullTranscript = finalTranscript || interimTranscript;
+        currentAnswerRef.current = fullTranscript;
+        setUserAnswerSubtitle(fullTranscript);
+      };
+      
+      recognitionRef.current.onerror = (event) => {
+        console.error('Speech recognition error:', event.error);
+        if (event.error === 'no-speech') {
+          // Don't stop on no-speech, just continue listening
+          return;
+        }
+        setIsListening(false);
+      };
+      
+      recognitionRef.current.onend = () => {
+        // Auto-restart if we're supposed to be listening
+        if (isListening) {
+          try {
+            recognitionRef.current.start();
+          } catch (e) {
+            console.log('Could not restart recognition:', e);
+            setIsListening(false);
+          }
+        }
+      };
+    }
+    
+    // Initialize Speech Synthesis and load voices
+    if ('speechSynthesis' in window) {
+      synthesisRef.current = window.speechSynthesis;
+      
+      // Load voices (some browsers need this)
+      const loadVoices = () => {
+        const voices = synthesisRef.current.getVoices();
+        console.log('Available voices:', voices.map(v => v.name));
+      };
+      
+      loadVoices();
+      if (synthesisRef.current.onvoiceschanged !== undefined) {
+        synthesisRef.current.onvoiceschanged = loadVoices;
+      }
+    }
+    
+    return () => {
+      if (recognitionRef.current) {
+        recognitionRef.current.stop();
+      }
+      if (synthesisRef.current) {
+        synthesisRef.current.cancel();
+      }
+    };
+  }, [isListening]);
+
+  // Function to speak question using TTS with female voice
+  const speakQuestion = useCallback((questionText) => {
+    if (!synthesisRef.current || !questionText) return;
+    
+    // Cancel any ongoing speech
+    synthesisRef.current.cancel();
+    
+    // Get available voices and select a female voice
+    const voices = synthesisRef.current.getVoices();
+    let selectedVoice = null;
+    
+    // Try to find a female voice (prefer English female voices)
+    const femaleVoices = voices.filter(voice => {
+      const name = voice.name.toLowerCase();
+      const lang = voice.lang.toLowerCase();
+      return lang.includes('en') && (
+        name.includes('female') || 
+        name.includes('samantha') || 
+        name.includes('karen') || 
+        name.includes('susan') ||
+        name.includes('zira') ||
+        name.includes('hazel') ||
+        name.includes('google uk english female') ||
+        name.includes('google us english female') ||
+        voice.gender === 'female'
+      );
+    });
+    
+    if (femaleVoices.length > 0) {
+      // Prefer high-quality voices
+      selectedVoice = femaleVoices.find(v => v.name.includes('premium')) || 
+                      femaleVoices.find(v => v.name.includes('enhanced')) ||
+                      femaleVoices[0];
+    } else {
+      // Fallback: try any English voice that sounds female
+      selectedVoice = voices.find(v => 
+        v.lang.toLowerCase().includes('en') && 
+        (v.name.toLowerCase().includes('female') || v.name.toLowerCase().includes('samantha'))
+      ) || voices.find(v => v.lang.toLowerCase().includes('en'));
+    }
+    
+    const utterance = new SpeechSynthesisUtterance(questionText);
+    utterance.rate = 0.85; // Slightly slower for sweet, clear speech
+    utterance.pitch = 1.2; // Higher pitch for female voice
+    utterance.volume = 1;
+    utterance.lang = 'en-US';
+    
+    if (selectedVoice) {
+      utterance.voice = selectedVoice;
+      console.log('Using voice:', selectedVoice.name);
+    }
+    
+    utterance.onstart = () => {
+      setIsSpeaking(true);
+    };
+    
+    utterance.onend = () => {
+      setIsSpeaking(false);
+      // Start listening after question is spoken
+      setTimeout(() => {
+        startListening();
+      }, 500);
+    };
+    
+    utterance.onerror = (event) => {
+      console.error('Speech synthesis error:', event.error);
+      setIsSpeaking(false);
+    };
+    
+    synthesisRef.current.speak(utterance);
+  }, []);
+
+  // Function to start listening for user answer
+  const startListening = useCallback(() => {
+    if (!recognitionRef.current || isListening) return;
+    
+    try {
+      currentAnswerRef.current = '';
+      setUserAnswerSubtitle('');
+      recognitionRef.current.start();
+      setIsListening(true);
+    } catch (error) {
+      console.error('Error starting speech recognition:', error);
+    }
+  }, [isListening]);
+
+  // Function to stop listening and save answer
+  const stopListeningAndSave = useCallback(async () => {
+    if (!recognitionRef.current || !isListening) return;
+    
+    recognitionRef.current.stop();
+    setIsListening(false);
+    
+    const userAnswer = currentAnswerRef.current.trim();
+    if (!userAnswer || !currentQuestion) return;
+    
+    // Find ideal answer for current question
+    const idealAnswerData = idealAnswers.find(
+      ans => ans.question_id === currentQuestion.question_id
+    );
+    
+    // Save response to backend
+    try {
+      const result = await saveUserResponse({
+        sessionId: sessionId,
+        questionId: currentQuestion.question_id,
+        questionText: currentQuestion.question,
+        userAnswer: userAnswer,
+        idealAnswer: idealAnswerData?.ideal_answer || null,
+        alternativeAnswers: idealAnswerData?.alternative_answers || []
+      });
+      
+      if (result.success) {
+        console.log('Response saved successfully');
+        
+        // Move to next question
+        const nextIndex = currentQuestionIndex + 1;
+        if (nextIndex < questions.length) {
+          setCurrentQuestionIndex(nextIndex);
+          setCurrentQuestion(questions[nextIndex]);
+          setQuestionSubtitle(questions[nextIndex].question || '');
+          setUserAnswerSubtitle('');
+          
+          // Speak next question after a short delay
+          setTimeout(() => {
+            speakQuestion(questions[nextIndex].question);
+          }, 1000);
+        } else {
+          console.log('All questions completed');
+          // Handle interview completion
+        }
+      }
+    } catch (error) {
+      console.error('Error saving response:', error);
+    }
+  }, [isListening, currentQuestion, currentQuestionIndex, questions, idealAnswers, sessionId, speakQuestion]);
+
+  // Auto-speak question when it changes
+  useEffect(() => {
+    if (currentQuestion && currentQuestion.question) {
+      // Small delay before speaking
+      const timer = setTimeout(() => {
+        speakQuestion(currentQuestion.question);
+      }, 500);
+      
+      return () => clearTimeout(timer);
+    }
+  }, [currentQuestion, speakQuestion]);
 
   // Function to capture frame from video and convert to base64
   const captureFrame = () => {
@@ -196,7 +536,7 @@ function Interview() {
     }
 
     try {
-      const response = await axios.post('http://localhost:8000/api/detections/speakers/', {
+      const response = await axios.post(`${API_BASE_URL}/api/detections/speakers/`, {
         audio: audioBase64,
         session_id: sessionId,
         sampling_rate: 16000
@@ -234,7 +574,7 @@ function Interview() {
 
     try {
       console.log('Sending audio for emotion detection...');
-      const response = await axios.post('http://localhost:8000/api/detections/emotion/', {
+      const response = await axios.post(`${API_BASE_URL}/api/detections/emotion/`, {
         audio: audioBase64,
         session_id: sessionId,
         sampling_rate: 16000
@@ -285,7 +625,7 @@ function Interview() {
       }
 
       // Send to backend API
-      const response = await axios.post('http://localhost:8000/api/detections/both/', {
+      const response = await axios.post(`${API_BASE_URL}/api/detections/both/`, {
         image: imageBase64,
         session_id: sessionId
       }, {
@@ -349,30 +689,71 @@ function Interview() {
   const initializeMedia = async () => {
     try {
       console.log('Requesting media access...');
-      const stream = await navigator.mediaDevices.getUserMedia({ 
-        video: { 
-          width: { ideal: 1280 },
-          height: { ideal: 720 },
-          facingMode: 'user'
-        }, 
-        audio: true 
-      });
       
-      console.log('Media access granted:', stream);
-      streamRef.current = stream;
+      // Request microphone access first (for interviewee)
+      let audioStream = null;
+      try {
+        audioStream = await navigator.mediaDevices.getUserMedia({ 
+          audio: {
+            echoCancellation: true,
+            noiseSuppression: true,
+            autoGainControl: true,
+            sampleRate: 16000
+          }
+        });
+        console.log('Microphone access granted');
+      } catch (audioErr) {
+        console.error('Microphone access error:', audioErr);
+        setError(`Microphone access error: ${audioErr.message}. Please allow microphone access to continue the interview.`);
+        return;
+      }
       
-      setCameraEnabled(true);
-      setMicEnabled(true);
+      // Request camera access
+      let videoStream = null;
+      try {
+        videoStream = await navigator.mediaDevices.getUserMedia({ 
+          video: { 
+            width: { ideal: 1280 },
+            height: { ideal: 720 },
+            facingMode: 'user'
+          }
+        });
+        console.log('Camera access granted');
+      } catch (videoErr) {
+        console.warn('Camera access error:', videoErr);
+        // Continue without camera if user denies
+      }
+      
+      // Combine streams
+      const tracks = [];
+      if (audioStream) {
+        tracks.push(...audioStream.getAudioTracks());
+      }
+      if (videoStream) {
+        tracks.push(...videoStream.getVideoTracks());
+      }
+      
+      const combinedStream = new MediaStream(tracks);
+      streamRef.current = combinedStream;
+      
+      // Set states based on available tracks
+      const hasAudio = audioStream !== null && audioStream.getAudioTracks().length > 0;
+      const hasVideo = videoStream !== null && videoStream.getVideoTracks().length > 0;
+      
+      setMicEnabled(hasAudio);
+      setCameraEnabled(hasVideo);
       setMediaInitialized(true);
       setError(null);
       
       // Log track states
-      console.log('Video tracks:', stream.getVideoTracks());
-      console.log('Audio tracks:', stream.getAudioTracks());
+      console.log('Video tracks:', combinedStream.getVideoTracks());
+      console.log('Audio tracks:', combinedStream.getAudioTracks());
+      console.log('Microphone enabled:', hasAudio);
+      console.log('Camera enabled:', hasVideo);
       
     } catch (err) {
       console.error('Error accessing media devices:', err);
-      setError(`Camera/Microphone access error: ${err.message}`);
+      setError(`Media access error: ${err.message}. Please allow camera and microphone access.`);
       setMediaInitialized(false);
     }
   };
@@ -498,7 +879,7 @@ function Interview() {
   useEffect(() => {
     // Start detection when camera is enabled and stream is ready
     if (cameraEnabled && streamReady && mediaInitialized) {
-      console.log('Starting continuous detection...');
+      console.log('Starting continuous face and posture detection...');
       
       // Clear any existing interval
       if (detectionIntervalRef.current) {
@@ -507,11 +888,17 @@ function Interview() {
       
       // Start detection interval (every 1 second)
       detectionIntervalRef.current = setInterval(() => {
-        sendFrameForDetection();
+        if (cameraEnabled && !isDetecting) {
+          sendFrameForDetection();
+        }
       }, 1000);
       
       // Also run detection immediately
-      sendFrameForDetection();
+      setTimeout(() => {
+        if (cameraEnabled && !isDetecting) {
+          sendFrameForDetection();
+        }
+      }, 500);
       
       // Cleanup function
       return () => {
@@ -524,11 +911,12 @@ function Interview() {
     } else {
       // Stop detection if camera is disabled
       if (detectionIntervalRef.current) {
+        console.log('Stopping detection - camera disabled or stream not ready');
         clearInterval(detectionIntervalRef.current);
         detectionIntervalRef.current = null;
       }
     }
-  }, [cameraEnabled, streamReady, mediaInitialized, sendFrameForDetection]);
+  }, [cameraEnabled, streamReady, mediaInitialized, isDetecting, sendFrameForDetection]);
 
   // Effect to start/stop continuous audio detection based on mic status
   useEffect(() => {
@@ -546,24 +934,28 @@ function Interview() {
       
       // Start audio detection interval (every 0.5 seconds for speaker, 1.5 seconds for emotion)
       audioIntervalRef.current = setInterval(async () => {
-        // Always capture short chunk for speaker detection
-        const audioBase64 = await captureAudioChunk();
-        if (audioBase64) {
-          console.log('Sending audio for speaker detection...');
-          sendAudioForDetection(audioBase64);
+        if (!micEnabled) {
+          return;
         }
         
-        // Capture longer chunk for emotion detection every 3rd iteration (every 1.5 seconds)
-        emotionCounterRef.current++;
-        if (emotionCounterRef.current >= 3) {
-          emotionCounterRef.current = 0;
-          console.log('Capturing audio for emotion detection...');
-          const emotionAudioBase64 = await captureAudioChunkForEmotion();
-          if (emotionAudioBase64) {
-            sendAudioForEmotionDetection(emotionAudioBase64);
-          } else {
-            console.log('Failed to capture audio for emotion detection');
+        try {
+          // Always capture short chunk for speaker detection
+          const audioBase64 = await captureAudioChunk();
+          if (audioBase64) {
+            sendAudioForDetection(audioBase64);
           }
+          
+          // Capture longer chunk for emotion detection every 3rd iteration (every 1.5 seconds)
+          emotionCounterRef.current++;
+          if (emotionCounterRef.current >= 3) {
+            emotionCounterRef.current = 0;
+            const emotionAudioBase64 = await captureAudioChunkForEmotion();
+            if (emotionAudioBase64) {
+              sendAudioForEmotionDetection(emotionAudioBase64);
+            }
+          }
+        } catch (error) {
+          console.error('Error in audio detection interval:', error);
         }
       }, 500);
       
@@ -589,7 +981,7 @@ function Interview() {
       setEmotionProbabilities(null);
       setEmotionConfidence(null);
     }
-      }, [micEnabled, streamReady, mediaInitialized, captureAudioChunk, captureAudioChunkForEmotion, sendAudioForDetection, sendAudioForEmotionDetection]);
+  }, [micEnabled, streamReady, mediaInitialized, captureAudioChunk, captureAudioChunkForEmotion, sendAudioForDetection, sendAudioForEmotionDetection]);
 
   console.log('Current state:', {
     mediaInitialized,
@@ -624,7 +1016,7 @@ function Interview() {
             <span className='decorative-text'>Behavioral Interview</span>
           </div>
           <div>
-            Question 1 of 3
+            Question {currentQuestionIndex + 1} of {questions.length || 1}
           </div>
         </div>
         <div className="progress-bottom">
@@ -756,17 +1148,26 @@ function Interview() {
             </div>
             <div className="status">
               <i className="fa fa-circle" aria-hidden="true"></i> Online
-              <span className='speaking'>Speaking</span>
+              {isSpeaking && <span className='speaking'>Speaking</span>}
             </div>
           </div>
 
           <div className="avatar-display">
             <div className="askquestion">
               <div>
-                <i className="fa fa-circle" aria-hidden="true"></i>
+                <i className={`fa fa-circle ${isSpeaking ? 'pulsing' : ''}`} aria-hidden="true"></i>
               </div>
-              <div>
-              
+              <div className="question-subtitle-container">
+                {questionSubtitle && (
+                  <div className="question-subtitle">
+                    <p>{questionSubtitle}</p>
+                  </div>
+                )}
+                {isSpeaking && (
+                  <div className="speaking-indicator">
+                    <span>AI Interviewer is speaking...</span>
+                  </div>
+                )}
               </div>
             </div>
           </div>
@@ -781,6 +1182,42 @@ function Interview() {
           </div>
 
           <div className="user-display">
+            {/* User Answer Subtitle - Always show when listening or has answer */}
+            {(isListening || userAnswerSubtitle) && (
+              <div className="user-answer-subtitle-container">
+                <div className="user-answer-subtitle">
+                  <p>{userAnswerSubtitle || 'Listening for your answer...'}</p>
+                </div>
+                {isListening && (
+                  <div className="listening-indicator">
+                    <span>🎤 Listening... Speak now</span>
+                  </div>
+                )}
+                {!isListening && userAnswerSubtitle && (
+                  <button 
+                    onClick={stopListeningAndSave}
+                    className="save-answer-btn"
+                    style={{
+                      marginTop: '10px',
+                      padding: '10px 20px',
+                      background: '#2ecc71',
+                      color: 'white',
+                      border: 'none',
+                      borderRadius: '6px',
+                      cursor: 'pointer',
+                      fontSize: '15px',
+                      fontWeight: 'bold',
+                      boxShadow: '0 4px 8px rgba(0, 0, 0, 0.2)',
+                      transition: 'all 0.2s ease'
+                    }}
+                    onMouseEnter={(e) => e.target.style.background = '#27ae60'}
+                    onMouseLeave={(e) => e.target.style.background = '#2ecc71'}
+                  >
+                    ✓ Save Answer & Next Question
+                  </button>
+                )}
+              </div>
+            )}
             {/* Detection results overlay - Posture */}
             {postureLabel && (
               <div className="detection-results-posture" style={{

@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import Navbar from './nav-bar.jsx';
 import './choice.css';
@@ -17,6 +17,59 @@ function Choice() {
   const [errors, setErrors] = useState({});
   const [isGenerating, setIsGenerating] = useState(false);
   const [generationError, setGenerationError] = useState(null);
+  const [isCheckingAuth, setIsCheckingAuth] = useState(true);
+
+  // Check authentication status on mount - redirect to login if not authenticated
+  useEffect(() => {
+    const checkAuth = () => {
+      const token = localStorage.getItem('token');
+      if (!token || token.trim() === '' || token === 'null' || token === 'undefined') {
+        setIsCheckingAuth(false);
+        navigate('/login');
+        return;
+      }
+      
+      // Validate token format
+      try {
+        const parts = token.split('.');
+        if (parts.length === 3) {
+          try {
+            const payload = JSON.parse(atob(parts[1]));
+            // Check if token is expired
+            if (payload.exp && payload.exp < Date.now() / 1000) {
+              localStorage.removeItem('token');
+              localStorage.removeItem('refreshToken');
+              setIsCheckingAuth(false);
+              navigate('/login');
+              return;
+            }
+            // Token is valid - user is authenticated
+            setIsCheckingAuth(false);
+            return;
+          } catch (e) {
+            // Invalid payload
+            localStorage.removeItem('token');
+            localStorage.removeItem('refreshToken');
+          }
+        }
+      } catch (e) {
+        // Invalid format
+        localStorage.removeItem('token');
+        localStorage.removeItem('refreshToken');
+      }
+      
+      // Token is invalid
+      setIsCheckingAuth(false);
+      navigate('/login');
+    };
+    
+    checkAuth();
+    
+    // Listen for auth changes
+    const handleAuthChange = () => checkAuth();
+    window.addEventListener('authChange', handleAuthChange);
+    return () => window.removeEventListener('authChange', handleAuthChange);
+  }, [navigate]);
 
   // IT Sector Job Roles
   const jobRoles = [
@@ -137,26 +190,46 @@ function Choice() {
       });
 
       if (result.success) {
-        // Store generated questions
+        // Store generated questions and ideal answers
         localStorage.setItem('generatedQuestions', JSON.stringify(result.data.questions));
+        if (result.data.ideal_answers) {
+          localStorage.setItem('idealAnswers', JSON.stringify(result.data.ideal_answers));
+        }
         localStorage.setItem('questionSessionId', sessionId);
         
-        // Navigate based on authentication
-        if (isAuthenticated) {
-          navigate('/interview');
-        } else {
-          navigate('/login');
-        }
+        // After form submission, always go to interview (user is already authenticated if they reached here)
+        navigate('/interview');
       } else {
         setGenerationError(result.error || 'Failed to generate questions. Please try again.');
         setIsGenerating(false);
       }
     } catch (error) {
       console.error('Error generating questions:', error);
-      setGenerationError('An error occurred while generating questions. Please try again.');
+      let errorMsg = 'An error occurred while generating questions. ';
+      if (error.message && error.message.includes('ECONNREFUSED')) {
+        errorMsg += 'Please make sure the Django backend server is running on http://localhost:8000';
+      } else {
+        errorMsg += 'Please try again.';
+      }
+      setGenerationError(errorMsg);
       setIsGenerating(false);
     }
   };
+
+  // Show loading while checking authentication
+  if (isCheckingAuth) {
+    return (
+      <>
+        <Navbar />
+        <div className="choice-container">
+          <div style={{ textAlign: 'center', padding: '40px' }}>
+            <i className="fa fa-spinner fa-spin" style={{ fontSize: '24px', marginBottom: '20px' }}></i>
+            <p>Checking authentication...</p>
+          </div>
+        </div>
+      </>
+    );
+  }
 
   return (
     <>
@@ -246,13 +319,31 @@ function Choice() {
             {generationError && (
               <div className="error-message" style={{ 
                 marginBottom: '15px', 
-                padding: '12px', 
+                padding: '16px', 
                 background: '#fee', 
-                border: '1px solid #fcc',
-                borderRadius: '4px',
-                color: '#c33'
+                border: '2px solid #fcc',
+                borderRadius: '8px',
+                color: '#c33',
+                fontSize: '14px',
+                lineHeight: '1.6'
               }}>
-                {generationError}
+                <div style={{ fontWeight: 'bold', marginBottom: '8px', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <i className="fa fa-exclamation-triangle" aria-hidden="true"></i>
+                  Error Generating Questions
+                </div>
+                <div>{generationError}</div>
+                {generationError.includes('localhost:8000') && (
+                  <div style={{ marginTop: '12px', padding: '10px', background: '#fff', borderRadius: '4px', fontSize: '13px' }}>
+                    <strong>Quick Fix:</strong>
+                    <ol style={{ marginTop: '8px', marginLeft: '20px' }}>
+                      <li>Open a terminal</li>
+                      <li>Navigate to: <code style={{ background: '#f0f0f0', padding: '2px 6px', borderRadius: '3px' }}>cd Backend</code></li>
+                      <li>Run: <code style={{ background: '#f0f0f0', padding: '2px 6px', borderRadius: '3px' }}>python manage.py runserver</code></li>
+                      <li>Wait for "Starting development server" message</li>
+                      <li>Click "Continue to Interview" again</li>
+                    </ol>
+                  </div>
+                )}
               </div>
             )}
 

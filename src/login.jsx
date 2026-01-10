@@ -124,7 +124,7 @@ function Login() {
         setIsAuthenticated(true);
         // Notify navbar of auth change
         window.dispatchEvent(new Event('authChange'));
-        navigate('/interview', { replace: true }); // Replace login page in history
+        navigate('/choice', { replace: true }); // Redirect to choice form first
       } catch (loginErr) {
         // Registration succeeded but auto-login failed
         setError('Registration successful. Please log in.');
@@ -165,7 +165,7 @@ function Login() {
       setIsAuthenticated(true);
       // Notify navbar of auth change
       window.dispatchEvent(new Event('authChange'));
-      navigate('/interview', { replace: true }); // Replace login page in history
+      navigate('/choice', { replace: true }); // Redirect to choice form first
     } catch (err) {
       setError(err.response?.data?.message || 'Login failed');
     } finally {

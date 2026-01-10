@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import './App.css'
 import Login from './login.jsx'
 import Interview from './interview.jsx';
@@ -8,10 +8,41 @@ import { Link, useNavigate } from 'react-router-dom';
 
 function App() {
   const [count, setCount] = useState(0)
+  const [isAuthenticated, setIsAuthenticated] = useState(false)
   const navigate = useNavigate();
 
+  // Check authentication status on mount and when it changes
+  useEffect(() => {
+    const checkAuth = () => {
+      const token = localStorage.getItem('token');
+      setIsAuthenticated(!!token && token.trim() !== '' && token !== 'null' && token !== 'undefined');
+    };
+
+    // Check on mount
+    checkAuth();
+    
+    // Listen for auth changes (login/logout events)
+    window.addEventListener('authChange', checkAuth);
+    window.addEventListener('storage', checkAuth);
+
+    return () => {
+      window.removeEventListener('authChange', checkAuth);
+      window.removeEventListener('storage', checkAuth);
+    };
+  }, []);
+
   const handleStartClick = () => {
-    navigate('/choice'); // Redirect to choice  
+    // Check if user is authenticated
+    const token = localStorage.getItem('token');
+    const hasValidToken = token && token.trim() !== '' && token !== 'null' && token !== 'undefined';
+    
+    if (hasValidToken) {
+      // User is logged in, go directly to form
+      navigate('/choice');
+    } else {
+      // User is not logged in, redirect to login
+      navigate('/login');
+    }
   };
 
   return (
@@ -32,7 +63,31 @@ function App() {
         <span className='text'><b>Practice with our AI interviewer, get real-time feedback on your answers, body language, and voice tone. Build confidence and land your dream job.</b></span>
 
         <div className="button">
-          <button onClick={handleStartClick}>Start Practice Interview   <i class="fa fa-long-arrow-right" aria-hidden="true"></i></button>
+          <button onClick={handleStartClick}>
+            {isAuthenticated ? (
+              <>
+                Start Practice Interview <i class="fa fa-long-arrow-right" aria-hidden="true"></i>
+              </>
+            ) : (
+              <>
+                Login to Start Interview <i class="fa fa-sign-in" aria-hidden="true"></i>
+              </>
+            )}
+          </button>
+          {isAuthenticated && (
+            <div style={{ 
+              marginTop: '10px', 
+              fontSize: '14px', 
+              color: '#2ecc71',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              gap: '6px'
+            }}>
+              <i class="fa fa-check-circle" aria-hidden="true"></i>
+              <span>You're logged in</span>
+            </div>
+          )}
         </div>
       </div>
 
