@@ -38,3 +38,5 @@ yarn-error.log*
 
 # macOS system files
 .DS_Store
+public/rain_v3.2.glb
+dist/
