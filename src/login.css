@@ -1,132 +1,181 @@
-*{
-    margin: 0;
-    padding: 0;
-}
-
-@font-face {
-  font-family: 'montbold'; /* Name you will use in CSS */
-  src: url('./assets/fonts/Montserrat-Bold.ttf');
-}
-
-@font-face {
-  font-family: 'montsemibold'; /* Name you will use in CSS */
-  src: url('./assets/fonts/Montserrat-SemiBold.ttf');
-}
-
-@font-face {
-  font-family: 'montregular'; /* Name you will use in CSS */
-  src: url('./assets/fonts/Montserrat-Regular.ttf');
-}
+/* login.css - Premium Access Portal */
 
 .form-container {
-  background-image: url('./assets/images/login-bg.jpg'); /* adjust path */
-  background-size: cover;
-  background-position: center;
-  height: 100vh;
-  width: 100%;
-  display: flex;
-  flex-direction: column;
-  justify-content: center;
-  align-items: center;
-}
-
-span.title{
-    font-family: montbold;
-    background: -webkit-linear-gradient(#b83cc4, #3c176b);
-    -webkit-background-clip: text;
-    -webkit-text-fill-color: transparent;
-    font-size: 62px;
-}
-
-span.sub-title{
-    font-family: montregular;
-    background: -webkit-linear-gradient(#830f8d, #230e3f);
-    -webkit-background-clip: text;
-    -webkit-text-fill-color: transparent;
-    font-size: 22px;
-    margin-bottom: 50px;
-}
-
-/* Actual form box */
-
-/* .formbox{
-    padding: 20px;
-    background: linear-gradient(45deg,rgba(255, 255, 255,0.6),rgba(255, 255, 255,0.3));
-    -webkit-backdrop-filter: blur(10px);
-    backdrop-filter: blur(10px);
-    border: 2px solid transparent;
-    border-image: linear-gradient(45deg, rgb(255, 255, 255), rgb(228, 228, 228));
-    border-image-slice: 1;
-    border-radius: 20px;
-
-} */
-
-
-.formbox {
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    align-items: center;
+    min-height: 100vh;
     position: relative;
-    font-family: montregular;
-    padding: 30px;
-    border-radius: 10px;
-    background: rgba(255, 255, 255, 0.35);
-    -webkit-backdrop-filter: blur(10px);
-    backdrop-filter: blur(10px);
-    font-size: 18px;
-    overflow: hidden; /* ensures inner blur doesn't exceed edges */
+    z-index: 10;
+    /* Background handled by Background3D */
+    padding-top: 80px;
+    /* Offset for navbar */
 }
 
-/* Gradient border using pseudo-element */
-.formbox::before {
-    content: '';
-    position: absolute;
-    top: -2px; left: -2px; bottom: -2px; right: -2px; /* covers outside the div */
-    border-radius: inherit; /* match parent border radius */
-    padding: 3px; /* thickness of border */
-    background: linear-gradient(45deg, #ffffff, #eaeaea);
-    -webkit-mask: 
-        linear-gradient(#fff 0 0) content-box, 
-        linear-gradient(#fff 0 0);
-    -webkit-mask-composite: destination-out;
-    mask-composite: exclude;
-    pointer-events: none; /* don't block clicks */
+/* Typography */
+span.title {
+    font-size: 4rem;
+    font-weight: 800;
+    letter-spacing: -0.04em;
+    background: var(--grade-primary);
+    -webkit-background-clip: text;
+    background-clip: text;
+    -webkit-text-fill-color: transparent;
+    color: var(--text-highlight);
+    /* Fallback */
+    margin-bottom: 8px;
+    line-height: 1.1;
+    text-align: center;
+    opacity: 0;
+    animation: slideUpFade 0.8s var(--ease-relax) forwards;
 }
 
-
-input.writable{
-    height: 30px;
-    width: 400px;
-    border: 1px solid #d8d8d8;
-    border-radius: 5px;
-    margin: 10px auto 10px auto;
-    padding: 10px;
-    font-size: 16px;
+span.sub-title {
+    font-size: 1.1rem;
+    color: var(--text-dim);
+    font-weight: 500;
+    margin-bottom: 48px;
+    text-align: center;
+    letter-spacing: 0.02em;
+    opacity: 0;
+    animation: slideUpFade 0.8s var(--ease-relax) 0.1s forwards;
 }
 
-input.submit{
-    height: 50px;
-    width: 100px;
-    border-radius: 5px;
-    font-size: 16px;
-    margin-top: 10px;
-    background: linear-gradient(to right, #dfbef8,#fcc4ff);
-    box-shadow: 5px 5px 10px #cecece;
-    border: 1px solid rgb(190, 188, 188);
-    align-self: center;
-    
+/* Form Box - Premium Glass (Light) */
+.formbox {
+    width: 100%;
+    max-width: 420px;
+    background: rgba(255, 255, 255, 0.7);
+    /* Light base */
+    backdrop-filter: blur(24px) saturate(180%);
+    -webkit-backdrop-filter: blur(24px) saturate(180%);
+    border: 1px solid rgba(255, 255, 255, 0.8);
+    border-top: 1px solid rgba(255, 255, 255, 0.9);
+    border-radius: 24px;
+    padding: 40px;
+    box-shadow: 0 40px 80px -20px rgba(100, 116, 139, 0.2);
+    /* Soft slate shadow */
+    opacity: 0;
+    animation: scaleIn 0.6s var(--ease-elastic) 0.2s forwards;
+    transition: transform 0.4s var(--ease-elastic);
 }
 
+.formbox:hover {
+    transform: translateY(-4px);
+    border-color: rgba(255, 255, 255, 1);
+    box-shadow: 0 50px 100px -20px rgba(100, 116, 139, 0.3), 0 0 30px rgba(99, 102, 241, 0.1);
+}
 
-button.submit{
-    font-family: montregular;
-    font-size: 14px;
-    margin: auto;
+.formbox form {
+    display: flex;
+    flex-direction: column;
+    gap: 20px;
+}
+
+/* Inputs */
+input.writable {
+    background: white;
+    border: 1px solid #e2e8f0;
+    /* Slate-200 */
+    border-radius: 12px;
+    padding: 16px 20px;
+    color: #1e293b;
+    /* Slate-800 */
+    font-size: 1rem;
+    font-family: 'Inter', sans-serif;
+    transition: all 0.3s ease;
+    width: 100%;
+    box-sizing: border-box;
+}
+
+input.writable:focus {
+    outline: none;
+    background: white;
+    border-color: var(--primary-glow);
+    box-shadow: 0 0 0 4px rgba(99, 102, 241, 0.1);
+    transform: translateY(-1px);
+}
+
+input.writable::placeholder {
+    color: #94a3b8;
+    /* Slate-400 */
+    font-weight: 400;
+}
+
+/* Submit Button */
+input.submit {
+    /* Premium Button Style but for input type="submit" */
+    background: var(--grade-primary);
+    color: white;
+    font-size: 1rem;
+    font-weight: 700;
+    padding: 16px;
+    border-radius: 99px;
     border: none;
-    background: transparent;
-    margin-top: 20px;
-    text-decoration: underline;
-    color: #525252;
+    cursor: pointer;
+    margin-top: 12px;
+    box-shadow: 0 10px 30px -5px rgba(99, 102, 241, 0.3);
+    transition: all 0.4s var(--ease-elastic);
+    -webkit-appearance: none;
+    appearance: none;
 }
 
-button.submit:hover{
-    color: #3c176b;
+input.submit:hover {
+    transform: translateY(-2px) scale(1.02);
+    box-shadow: 0 20px 40px -10px rgba(99, 102, 241, 0.5);
+}
+
+input.submit:active {
+    transform: translateY(0) scale(0.98);
+}
+
+input.submit:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+    filter: grayscale(1);
+}
+
+/* Secondary Actions */
+button.submit {
+    background: transparent;
+    color: var(--text-dim);
+    font-size: 0.85rem;
+    border: none;
+    margin-top: 16px;
     cursor: pointer;
+    transition: color 0.2s;
+    align-self: center;
+    /* Center distinct */
+    text-decoration: none;
+}
+
+button.submit:hover {
+    color: var(--primary-glow);
+    text-decoration: underline;
+    text-underline-offset: 4px;
+}
+
+/* Responsive */
+@media (max-width: 480px) {
+    .form-container {
+        padding-top: 100px;
+        /* Ensure title is visible below nav */
+        justify-content: flex-start;
+        /* Allow scrolling without centering vertically blocking top */
+    }
+
+    .formbox {
+        padding: 24px;
+        width: 90%;
+    }
+
+    span.title {
+        font-size: 2.5rem;
+    }
+
+    span.sub-title {
+        font-size: 0.95rem;
+        margin-bottom: 32px;
+    }
 }

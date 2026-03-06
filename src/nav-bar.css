@@ -1,103 +1,158 @@
-@font-face {
-  font-family: 'montbold'; /* Name you will use in CSS */
-  src: url('./assets/fonts/Montserrat-Bold.ttf');
-}
-@font-face {
-  font-family: 'montregular'; /* Name you will use in CSS */
-  src: url('./assets/fonts/Montserrat-Regular.ttf');
+/* nav-bar.css - Premium Floating Dock */
+
+nav {
+    position: fixed;
+    top: 24px;
+    left: 50%;
+    transform: translateX(-50%);
+    width: 90%;
+    max-width: 1200px;
+    padding: 16px 32px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    z-index: 1000;
+
+    /* Glassmorphism - Light */
+    background: rgba(255, 255, 255, 0.85);
+    backdrop-filter: blur(24px) saturate(180%);
+    -webkit-backdrop-filter: blur(24px) saturate(180%);
+    border: 1px solid rgba(255, 255, 255, 0.8);
+    border-radius: 999px;
+    /* Pill shape */
+    box-shadow: 0 10px 40px -10px rgba(148, 163, 184, 0.3);
+    transition: all 0.4s var(--ease-smooth);
 }
 
+nav:hover {
+    background: rgba(255, 255, 255, 0.95);
+    border-color: rgba(255, 255, 255, 1);
+    box-shadow: 0 20px 60px -12px rgba(148, 163, 184, 0.4);
+}
 
-nav{
+/* Logo */
+nav div.logo {
+    flex: 1;
     display: flex;
     align-items: center;
-    justify-content: center;
-    box-shadow: 0px 5px 10px rgb(209, 209, 209);
-    padding: 20px;
-    background-color: #ffffff;
-    font-family: montregular;
 }
 
-nav div.logo{
-    width: 50%;
-}
-
-nav div.logo span{
-    font-size: 30px;
-    background: -webkit-linear-gradient(#b83cc4, #3c176b);
+nav div.logo span {
+    font-family: 'Inter', sans-serif;
+    font-weight: 800;
+    font-size: 1.5rem;
+    letter-spacing: -0.05em;
+    background: var(--grade-primary);
     -webkit-background-clip: text;
+    background-clip: text;
     -webkit-text-fill-color: transparent;
-    font-family: montbold;
-}
-
-nav div.nav-links ul{
-    display: flex;
-    gap: 50px;
-    list-style-type: none;
-    color: #3b3b3b;
-    justify-content: center;
-    align-items: center;
-}
-
-.login{
-    background: linear-gradient(to right, #9c4dfd,#e345f8);
-    padding: 10px 20px;
-    border-radius: 5px;
-    color: #ffffff;
-    font-family: montsemibold;
-    text-decoration: none;
-    align-self: center;
-    transition: .3s;
-}
-
-.login:hover{
-    background: linear-gradient(45deg,#e345f8, #9c4dfd);
-    transition: .3s;
-    box-shadow: 2px 2px 5px #c6c6c6;
-    
-}
-
-.logout-btn {
-    background: linear-gradient(to right, #9c4dfd,#e345f8);
-    padding: 10px 20px;
-    border-radius: 5px;
-    color: #ffffff;
-    font-family: montsemibold;
-    text-decoration: none;
-    align-self: center;
-    transition: .3s;
-    border: none;
     cursor: pointer;
-    font-size: inherit;
+    transition: opacity 0.3s;
 }
 
+nav div.logo span:hover {
+    opacity: 0.8;
+}
+
+/* Links */
+nav div.nav-links ul {
+    display: flex;
+    gap: 32px;
+    list-style: none;
+    margin: 0;
+    padding: 0;
+}
+
+nav div.nav-links li {
+    color: var(--text-dim);
+    font-weight: 600;
+    font-size: 0.95rem;
+    transition: color 0.3s;
+    cursor: pointer;
+}
+
+nav div.nav-links li:hover {
+    color: var(--primary-glow);
+}
+
+/* Auth Buttons */
+.login,
+.logout-btn {
+    background: white;
+    color: var(--primary-glow);
+    padding: 10px 24px;
+    border-radius: 999px;
+    font-weight: 600;
+    font-size: 0.9rem;
+    text-decoration: none;
+    border: 1px solid rgba(99, 102, 241, 0.2);
+    transition: all 0.3s var(--ease-elastic);
+    cursor: pointer;
+    box-shadow: 0 2px 10px rgba(99, 102, 241, 0.05);
+}
+
+.login:hover,
 .logout-btn:hover {
-    background: linear-gradient(45deg,#e345f8, #9c4dfd);
-    transition: .3s;
-    box-shadow: 2px 2px 5px #c6c6c6;
+    background: var(--primary-glow);
+    color: white;
+    border-color: transparent;
+    box-shadow: 0 8px 25px rgba(99, 102, 241, 0.3);
+    transform: translateY(-2px);
 }
 
+/* Logout Message Toast */
 .logout-message {
     position: fixed;
-    top: 80px;
-    right: 20px;
-    background: linear-gradient(to right, #4caf50, #45a049);
-    color: white;
-    padding: 15px 25px;
-    border-radius: 5px;
-    box-shadow: 0px 4px 10px rgba(0, 0, 0, 0.2);
-    z-index: 1000;
-    font-family: montregular;
-    animation: slideIn 0.3s ease-out;
+    top: 100px;
+    /* Below nav */
+    right: 50%;
+    transform: translateX(50%);
+    background: rgba(0, 0, 0, 0.9);
+    /* Dark/Black Toast */
+    backdrop-filter: blur(12px);
+    border: 1px solid rgba(255, 255, 255, 0.2);
+    color: #ffffff;
+    padding: 12px 24px;
+    border-radius: 12px;
+    box-shadow: 0 10px 30px -10px rgba(0, 0, 0, 0.5);
+    z-index: 2000;
+    font-weight: 600;
+    animation: slideDownFade 0.5s var(--ease-elastic) forwards;
+    display: flex;
+    align-items: center;
+    gap: 12px;
 }
 
-@keyframes slideIn {
-    from {
-        transform: translateX(100%);
+@keyframes slideDownFade {
+    0% {
         opacity: 0;
+        transform: translate(50%, -20px);
     }
-    to {
-        transform: translateX(0);
+
+    100% {
         opacity: 1;
+        transform: translate(50%, 0);
+    }
+}
+
+@media (max-width: 768px) {
+    nav {
+        width: 95%;
+        padding: 12px 20px;
+        top: 16px;
+    }
+
+    nav div.nav-links ul {
+        gap: 16px;
+    }
+
+    nav div.logo span {
+        font-size: 1.2rem;
+    }
+
+    .login,
+    .logout-btn {
+        padding: 8px 16px;
+        font-size: 0.85rem;
     }
 }

@@ -4,10 +4,11 @@ import Login from './login.jsx'
 import Interview from './interview.jsx';
 import Navbar from './nav-bar.jsx';
 import { Link, useNavigate } from 'react-router-dom';
+import Background3D from './components/Background3D';
+import SplineHero from './components/SplineHero';
 
 
 function App() {
-  const [count, setCount] = useState(0)
   const [isAuthenticated, setIsAuthenticated] = useState(false)
   const navigate = useNavigate();
 
@@ -20,7 +21,7 @@ function App() {
 
     // Check on mount
     checkAuth();
-    
+
     // Listen for auth changes (login/logout events)
     window.addEventListener('authChange', checkAuth);
     window.addEventListener('storage', checkAuth);
@@ -35,7 +36,7 @@ function App() {
     // Check if user is authenticated
     const token = localStorage.getItem('token');
     const hasValidToken = token && token.trim() !== '' && token !== 'null' && token !== 'undefined';
-    
+
     if (hasValidToken) {
       // User is logged in, go directly to form
       navigate('/choice');
@@ -47,104 +48,118 @@ function App() {
 
   return (
     <>
+      <Background3D />
 
       {/* Nav-bar */}
-        <Navbar /> {/*Navbar component call garna lai*/}
-
-    
+      <Navbar />
 
       {/* Content */}
+      <div className="hero-section">
+        <div className="hero-text">
+          <span className='small'><i className="fa fa-certificate" aria-hidden="true"></i>AIPowered Interview Practice</span>
+          <h1 className='large'>Master Your Next <span className='interview'>Interview</span></h1>
+          <p className='text'>Practice with our AI interviewer, get real-time feedback on your answers, body language, and voice tone. Build confidence and land your dream job.</p>
 
-      <div className="content-top">
-        <span className='small'><i class="fa fa-certificate" aria-hidden="true"></i>AI powered interview practice</span>
-
-        <span className='large'>Master your next <span className='interview'>interview</span></span>
-
-        <span className='text'><b>Practice with our AI interviewer, get real-time feedback on your answers, body language, and voice tone. Build confidence and land your dream job.</b></span>
-
-        <div className="button">
-          <button onClick={handleStartClick}>
-            {isAuthenticated ? (
-              <>
-                Start Practice Interview <i class="fa fa-long-arrow-right" aria-hidden="true"></i>
-              </>
-            ) : (
-              <>
-                Login to Start Interview <i class="fa fa-sign-in" aria-hidden="true"></i>
-              </>
+          <div className="button-group">
+            <button onClick={handleStartClick} className="primary-btn">
+              {isAuthenticated ? (
+                <>Start Practice <i className="fa fa-long-arrow-right" aria-hidden="true"></i></>
+              ) : (
+                <>Login to Start <i className="fa fa-sign-in" aria-hidden="true"></i></>
+              )}
+            </button>
+            {isAuthenticated && (
+              <div className="logged-in-badge">
+                <i className="fa fa-check-circle" aria-hidden="true"></i>
+                <span>You're logged in</span>
+              </div>
             )}
-          </button>
-          {isAuthenticated && (
-            <div style={{ 
-              marginTop: '10px', 
-              fontSize: '14px', 
-              color: '#2ecc71',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              gap: '6px'
-            }}>
-              <i class="fa fa-check-circle" aria-hidden="true"></i>
-              <span>You're logged in</span>
-            </div>
-          )}
+          </div>
+        </div>
+
+        <div className="hero-3d">
+          <SplineHero />
         </div>
       </div>
 
       {/* Cards-- */}
-
-      <div className='question'><span>Why choose MockiT?</span></div>
+      <div className='section-title'>
+        <h2>Why Choose MockiT?</h2>
+        <div className="underline"></div>
+      </div>
 
       <div className="card-container">
-        <div className="card">
-
-          <div className='icon'><i class="fa fa-comment" aria-hidden="true"></i></div>
-
-          <span className='title'>Smart question generation</span>
-          <span className='cont'>AI-powered questions tailored to your industry and role</span>
+        <div className="glass-card">
+          <div className='icon-box'><i className="fa fa-comment" aria-hidden="true"></i></div>
+          <span className='card-title'>Smart Question Generation</span>
+          <span className='card-desc'>AI-powered questions tailored to your industry and role.</span>
         </div>
 
-        <div className="card">
-          <div className='icon'><i class="fa fa-camera" aria-hidden="true"></i></div>
-
-          <span className='title'>Body Language Analysis</span>
-          <span className='cont'>Real-time feedback on posture, eye contact, and gestures</span>
+        <div className="glass-card">
+          <div className='icon-box'><i className="fa fa-camera" aria-hidden="true"></i></div>
+          <span className='card-title'>Body Language Analysis</span>
+          <span className='card-desc'>Real-time feedback on posture, eye contact, and gestures.</span>
         </div>
 
-        <div className="card">
-          <div className='icon'><i class="fa fa-pencil" aria-hidden="true"></i></div>
-
-          <span className='title'>Answer Evaluation</span>
-          <span className='cont'>Compare your responses with ideal answers and get scoring</span>
+        <div className="glass-card">
+          <div className='icon-box'><i className="fa fa-pencil" aria-hidden="true"></i></div>
+          <span className='card-title'>Answer Evaluation</span>
+          <span className='card-desc'>Compare your responses with ideal answers and get scoring.</span>
         </div>
 
-        <div className="card">
-          <div className='icon'><i class="fa fa-microphone" aria-hidden="true"></i></div>
-
-          <span className='title'>Voice Emotion Detection</span>
-          <span className='cont'>Analyze tone, pace, and confidence in your responses</span>
+        <div className="glass-card">
+          <div className='icon-box'><i className="fa fa-microphone" aria-hidden="true"></i></div>
+          <span className='card-title'>Voice Emotion Detection</span>
+          <span className='card-desc'>Analyze tone, pace, and confidence in your responses.</span>
         </div>
       </div>
 
-
       {/* Footer */}
+      <footer className="footer-premium">
+        <div className="footer-main">
+          <div className="footer-brand">
+            <span className="logo">MockiT</span>
+            <p className="slogan">Master your next interview with AI-powered realism and real-time feedback.</p>
+            <div className="social-links">
+              <a href="#"><i className="fa fa-linkedin"></i></a>
+              <a href="#"><i className="fa fa-twitter"></i></a>
+              <a href="#"><i className="fa fa-github"></i></a>
+            </div>
+          </div>
 
-      <footer>
-        <div className="f-left">
-          <span className="logo">MockiT</span>
-          <span>Kathmandu, Nepal</span>
-          <span className='slogan'><i>Master your next interview effortlessly</i></span>
+          <div className="footer-links">
+            <div className="link-group">
+              <span className="footer-title">Product</span>
+              <ul>
+                <li><Link to="/">Home</Link></li>
+                <li><Link to="/choice">Practice</Link></li>
+                <li><Link to="/premium">Premium</Link></li>
+              </ul>
+            </div>
 
+            <div className="link-group">
+              <span className="footer-title">Company</span>
+              <ul>
+                <li><a href="#">About Us</a></li>
+                <li><a href="#">Contact</a></li>
+                <li><a href="#">Privacy Policy</a></li>
+              </ul>
+            </div>
+
+            <div className="link-group">
+              <span className="footer-title">Developed by</span>
+              <ul className="developer-list">
+                <li>Prayash Niraula</li>
+                <li>Ranjit Adhikari</li>
+                <li>Sarishma Neupane</li>
+                <li>Sujit Adhikari</li>
+              </ul>
+            </div>
+          </div>
         </div>
 
-        <div className="f-right">
-          <span className="title">Developed by:</span>
-          <ul>
-            <li>Prayash Niraula</li>
-            <li>Ranjit Adhikari</li>
-            <li>Sarishma Neupane</li>
-            <li>Sujit Adhikari</li>
-          </ul>
+        <div className="footer-bottom">
+          <p>&copy; 2024 MockiT • Kathmandu, Nepal • All rights reserved.</p>
         </div>
       </footer>
     </>

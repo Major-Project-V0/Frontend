@@ -1,41 +1,70 @@
-import { useState, useEffect, useRef, useCallback } from 'react'
+import { useState, useEffect, useRef, useCallback, Suspense, Component } from 'react'
+import { Canvas } from '@react-three/fiber'
+import { PerspectiveCamera, Environment, OrbitControls, Stage, Center, Html } from '@react-three/drei'
+import { Experience } from './components/Experience.jsx'
 import { useNavigate } from 'react-router-dom'
 import axios from 'axios'
 import './interview.css'
 import Navbar from './nav-bar.jsx';
-import { saveUserResponse, processUserResponse } from './services/geminiService';
+import { saveUserResponse, endInterview } from './services/geminiService';
+import { recordAudioAsWav } from './services/audioUtils';
+import Background3D from './components/Background3D';
+import { useToast } from './context/ToastContext';
 
 // API Base URL
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000';
+const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://127.0.0.1:8000';
+
+// Import asset correctly
+import avatarImage from './assets/professional_ai_interviewer.png';
+// Basic Error Boundary for 3D content
+class ErrorBoundary extends Component {
+  constructor(props) {
+    super(props);
+    this.state = { hasError: false, error: null };
+  }
+
+  static getDerivedStateFromError(error) {
+    return { hasError: true, error };
+  }
+
+  componentDidCatch(error, errorInfo) {
+    console.error("3D Render Error:", error, errorInfo);
+  }
+
+  render() {
+    if (this.state.hasError) {
+      if (this.props.fallback) {
+        return this.props.fallback;
+      }
+      return (
+        <div style={{ padding: 20, textAlign: 'center', color: 'red' }}>
+          <h3>Avatar Error</h3>
+          <p>{this.state.error?.message}</p>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
 
 function Interview() {
+  const { addToast } = useToast();
   const navigate = useNavigate();
-  const [count, setCount] = useState(0)
-  const [interview, setInterview] = useState({});
-  const [isRecording, setIsRecording] = useState(false);
-  const [cameraEnabled, setCameraEnabled] = useState(false);
-  const [micEnabled, setMicEnabled] = useState(false);
-  const [error, setError] = useState(null);
-  const [mediaInitialized, setMediaInitialized] = useState(false);
-  const [streamReady, setStreamReady] = useState(false);
-  
-  // Detection state
   const [postureLabel, setPostureLabel] = useState(null);
-  const [postureConfidence, setPostureConfidence] = useState(null);
   const [faceCount, setFaceCount] = useState(0);
-  const [sessionId, setSessionId] = useState(null);
   const [isDetecting, setIsDetecting] = useState(false);
-  
-  // Speaker detection state
-  const [speakerStatus, setSpeakerStatus] = useState(null); // 'single', 'multiple', or null
-  const [speakerConfidence, setSpeakerConfidence] = useState(null);
   const [hasSpeech, setHasSpeech] = useState(false);
-  
+  const [streamReady, setStreamReady] = useState(false);
+
   // Emotion detection state
-  const [dominantEmotion, setDominantEmotion] = useState(null);
-  const [emotionProbabilities, setEmotionProbabilities] = useState(null);
-  const [emotionConfidence, setEmotionConfidence] = useState(null);
-  
+  const [dominantEmotion, setDominantEmotion] = useState('NEUTRAL');
+  const [emotionConfidence, setEmotionConfidence] = useState(0);
+  const [speakerStatus, setSpeakerStatus] = useState('single');
+
+  const [isInterviewee, setIsInterviewee] = useState(true);
+  const [totalQuestionsAsked, setTotalQuestionsAsked] = useState(0);
+
+
   // Interview questions state
   const [questions, setQuestions] = useState([]);
   const [idealAnswers, setIdealAnswers] = useState([]);
@@ -43,29 +72,81 @@ function Interview() {
   const [currentQuestion, setCurrentQuestion] = useState(null);
   const [questionSubtitle, setQuestionSubtitle] = useState('');
   const [userAnswerSubtitle, setUserAnswerSubtitle] = useState('');
-  const [isSpeaking, setIsSpeaking] = useState(false);
+
   const [isListening, setIsListening] = useState(false);
   const [candidateInfo, setCandidateInfo] = useState(null);
-  
-  // Speech recognition and synthesis refs
+  const [isSpeaking, setIsSpeaking] = useState(false);
+
+  // Interview flow state
+  const [interviewStage, setInterviewStage] = useState('initial'); // 'initial', 'greeting', 'listening_for_start', 'question_speaking', 'listening_for_answer', 'processing'
+
+  const currentAnswerRef = useRef('');
+  const accumulatedTranscriptRef = useRef(''); // Added for smoother subtitles
   const recognitionRef = useRef(null);
   const synthesisRef = useRef(null);
-  const currentAnswerRef = useRef('');
-  
+  const interviewStageRef = useRef('initial');
+
+  const isListeningRef = useRef(false);
+
+  // Custom setter to keep ref in sync
+  const setStage = (newStage) => {
+    console.log(`[STAGE CHANGE] ${interviewStageRef.current} -> ${newStage}`);
+    interviewStageRef.current = newStage;
+    setInterviewStage(newStage);
+  };
+
+  const setListening = (val) => {
+    isListeningRef.current = val;
+    setIsListening(val);
+  };
+
+  const [cameraEnabled, setCameraEnabled] = useState(false);
+  const [micEnabled, setMicEnabled] = useState(false);
+  const [error, setError] = useState(null);
+  const [mediaInitialized, setMediaInitialized] = useState(false);
+  const [sessionId, setSessionId] = useState(null);
+  const [preloadedNextQuestion, setPreloadedNextQuestion] = useState(null);
+  const [showSpeakNow, setShowSpeakNow] = useState(false);
+  const [questionFeedback, setQuestionFeedback] = useState([]); // NEW: Store feedback for each question
+  const [lastQuestionFeedback, setLastQuestionFeedback] = useState(null); // Last question's feedback to show
+  const [isProcessing, setIsProcessing] = useState(false);
+  const [micLevel, setMicLevel] = useState(0); // Audio level for visualization
+  const analyserRef = useRef(null);
+  const dataArrayRef = useRef(null);
+  const animationFrameRef = useRef(null);
+
+  // Removed static string path in favor of import
+
+
+
+  const [backgroundDetectionEnabled] = useState(true);
+
   // Refs for video elements
   const videoRef = useRef(null);
   const streamRef = useRef(null);
-  const mediaRecorderRef = useRef(null);
-  const recordedChunksRef = useRef([]);
   const detectionIntervalRef = useRef(null);
   const canvasRef = useRef(null);
-  
+
   // Audio processing refs
-  const audioContextRef = useRef(null);
-  const audioProcessorRef = useRef(null);
   const audioIntervalRef = useRef(null);
-  const audioChunksRef = useRef([]);
   const emotionCounterRef = useRef(0);
+  const persistentAudioContextRef = useRef(null);
+
+  // Manage body styles for fullscreen interview mode
+  useEffect(() => {
+    // Save original styles
+    const originalStyle = window.getComputedStyle(document.body).overflow;
+    const originalBg = document.body.style.backgroundColor;
+
+    // Apply interview styles
+    document.body.style.backgroundColor = '#f5f0ff';
+
+    // Cleanup on unmount
+    return () => {
+      document.body.style.overflow = originalStyle;
+      document.body.style.backgroundColor = originalBg;
+    };
+  }, []);
 
   // Check authentication on mount - redirect to login if not authenticated
   useEffect(() => {
@@ -75,7 +156,7 @@ function Interview() {
       navigate('/login');
       return;
     }
-    
+
     // Validate token format
     try {
       const parts = token.split('.');
@@ -91,35 +172,62 @@ function Interview() {
           }
           // Token is valid
           return;
-        } catch (e) {
+        } catch {
           // Invalid payload
           localStorage.removeItem('token');
           localStorage.removeItem('refreshToken');
         }
       }
-    } catch (e) {
+    } catch {
       // Invalid format
       localStorage.removeItem('token');
       localStorage.removeItem('refreshToken');
     }
-    
+
     // Token is invalid
     navigate('/login');
   }, [navigate]);
+
+  const [isActuallySpeaking, setIsActuallySpeaking] = useState(false);
+  const isActuallySpeakingRef = useRef(false);
+
+  const setActuallySpeaking = (val) => {
+    isActuallySpeakingRef.current = val;
+    setIsActuallySpeaking(val);
+  };
 
   // Generate session ID on mount
   useEffect(() => {
     const generateSessionId = () => {
       return 'session_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
     };
-    const storedSessionId = localStorage.getItem('questionSessionId');
-    if (storedSessionId) {
-      setSessionId(storedSessionId);
-    } else {
-      const newSessionId = generateSessionId();
-      setSessionId(newSessionId);
-      localStorage.setItem('questionSessionId', newSessionId);
+
+    // Priority: questionSessionId (from choice.jsx) -> currentSessionId -> candidateInfo.sessionId -> new
+    const questionSessionId = localStorage.getItem('questionSessionId');
+    const storedSessionId = localStorage.getItem('currentSessionId');
+    const storedCandidateInfo = localStorage.getItem('candidateInfo');
+    const candidateSessionId = storedCandidateInfo ? JSON.parse(storedCandidateInfo).sessionId : null;
+
+    const finalSessionId = questionSessionId || storedSessionId || candidateSessionId || generateSessionId();
+
+    setSessionId(finalSessionId);
+    if (!storedSessionId) {
+      localStorage.setItem('currentSessionId', finalSessionId);
     }
+  }, []);
+
+  const lastSpeechTimeRef = useRef(0);
+
+  useEffect(() => {
+    const checkSilence = setInterval(() => {
+      if (isListeningRef.current) {
+        const now = Date.now();
+        if (now - lastSpeechTimeRef.current > 3000) {
+          setActuallySpeaking(false);
+        }
+      }
+    }, 1000);
+    return () => clearInterval(checkSilence);
   }, []);
 
   // Load questions from localStorage on mount
@@ -128,11 +236,23 @@ function Interview() {
       try {
         const storedQuestions = localStorage.getItem('generatedQuestions');
         const storedCandidateInfo = localStorage.getItem('candidateInfo');
-        const questionSessionId = localStorage.getItem('questionSessionId');
-        
+
         if (storedQuestions) {
           const questionsData = JSON.parse(storedQuestions);
-          
+
+          // Load preloaded next question
+          const storedPreloaded = localStorage.getItem('preloadedNextQuestion');
+          console.log('Stored preloaded question:', storedPreloaded);
+          if (storedPreloaded) {
+            try {
+              const parsed = JSON.parse(storedPreloaded);
+              console.log('Parsed preloaded question:', parsed);
+              setPreloadedNextQuestion(parsed);
+            } catch (e) {
+              console.error('Failed to parse preloaded question:', e);
+            }
+          }
+
           // Load ideal answers from localStorage first
           const storedIdealAnswers = localStorage.getItem('idealAnswers');
           if (storedIdealAnswers) {
@@ -143,30 +263,24 @@ function Interview() {
               console.error('Error parsing ideal answers:', error);
             }
           }
-          
-          // Check if questions are in new format (with question_id) or old format
-          if (questionsData.length > 0 && questionsData[0].question_id) {
-            setQuestions(questionsData);
-          } else {
-            // Old format - convert to new format
-            const convertedQuestions = questionsData.map((q, idx) => ({
-              question_id: `q_${idx}_${Date.now()}`,
-              question: typeof q === 'string' ? q : q.question || ''
-            }));
-            setQuestions(convertedQuestions);
-          }
-          
+
           // Set first question
           if (questionsData.length > 0) {
             const firstQ = questionsData[0];
-            setCurrentQuestion({
-              question_id: firstQ.question_id || `q_0_${Date.now()}`,
-              question: typeof firstQ === 'string' ? firstQ : firstQ.question || ''
-            });
-            setQuestionSubtitle(typeof firstQ === 'string' ? firstQ : firstQ.question || '');
+
+
+            // If we converted, use converted, otherwise use original but ensure reference
+            const finalQuestions = (questionsData[0].question_id) ? questionsData :
+              questionsData.map((q, idx) => ({
+                question_id: `q_${idx}_${Date.now()}`,
+                question: typeof q === 'string' ? q : q.question || ''
+              }));
+
+            setQuestions(finalQuestions);
+            setCurrentQuestion(finalQuestions[0]);
           }
         }
-        
+
         if (storedCandidateInfo) {
           const info = JSON.parse(storedCandidateInfo);
           setCandidateInfo(info);
@@ -175,234 +289,502 @@ function Interview() {
         console.error('Error loading questions:', error);
       }
     };
-    
+
     loadQuestions();
   }, []);
 
-  // Initialize Speech Recognition and Synthesis
+  // DISABLED: This was causing redirect loops
+  // Redirect to prepare if no questions loaded
+  // useEffect(() => {
+  //   if (questions.length === 0 && !candidateInfo) {
+  //     console.warn('No questions or candidate info found. Redirecting to choice page...');
+  //     setTimeout(() => {
+  //       navigate('/choice');
+  //     }, 2000);
+  //   }
+  // }, [questions, candidateInfo, navigate]);
+
+  // Initialize Speech Recognition and Synthesis once
   useEffect(() => {
     // Initialize Web Speech API
     if ('webkitSpeechRecognition' in window || 'SpeechRecognition' in window) {
       const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
       recognitionRef.current = new SpeechRecognition();
-      recognitionRef.current.continuous = true;
+      recognitionRef.current.continuous = true; // Keep listening until manually stopped
       recognitionRef.current.interimResults = true;
-      recognitionRef.current.lang = 'en-US';
-      
+      recognitionRef.current.maxAlternatives = 1;
+      recognitionRef.current.lang = 'en-US'; // Reverted to en-US as requested
+
+      // Prevent auto-stopping on silence
+      recognitionRef.current.onsoundstart = () => {
+        setActuallySpeaking(true);
+      };
+
+      recognitionRef.current.onsoundend = () => {
+        // Do NOT stop recognition here. Just update UI state.
+        setActuallySpeaking(false);
+      };
+
+      recognitionRef.current.onspeechstart = () => {
+        setActuallySpeaking(true);
+      };
+
+      recognitionRef.current.onspeechend = () => {
+        setActuallySpeaking(false);
+      };
+
       recognitionRef.current.onresult = (event) => {
+        lastSpeechTimeRef.current = Date.now();
+        setActuallySpeaking(true);
         let interimTranscript = '';
-        let finalTranscript = '';
-        
+        let newFinalTranscript = '';
+
         for (let i = event.resultIndex; i < event.results.length; i++) {
           const transcript = event.results[i][0].transcript;
           if (event.results[i].isFinal) {
-            finalTranscript += transcript + ' ';
+            newFinalTranscript += transcript + ' ';
           } else {
             interimTranscript += transcript;
           }
         }
-        
-        const fullTranscript = finalTranscript || interimTranscript;
-        currentAnswerRef.current = fullTranscript;
-        setUserAnswerSubtitle(fullTranscript);
+
+        // Add to our persistent accumulation
+        if (newFinalTranscript) {
+          accumulatedTranscriptRef.current += newFinalTranscript;
+        }
+
+        const displayedTranscript = (accumulatedTranscriptRef.current + interimTranscript).trim();
+
+        currentAnswerRef.current = displayedTranscript;
+        setUserAnswerSubtitle(displayedTranscript);
       };
-      
+
       recognitionRef.current.onerror = (event) => {
         console.error('Speech recognition error:', event.error);
-        if (event.error === 'no-speech') {
-          // Don't stop on no-speech, just continue listening
-          return;
-        }
-        setIsListening(false);
+        if (event.error === 'no-speech') return;
+        // Do not stop listening on error if possible, just log
       };
-      
+
       recognitionRef.current.onend = () => {
-        // Auto-restart if we're supposed to be listening
-        if (isListening) {
+        console.log('Speech recognition ended. Ref isListening:', isListeningRef.current);
+
+        // AGGRESSIVE RESTART: If we are supposed to be listening, RESTART IMMEDIATELY
+        if (isListeningRef.current) {
           try {
+            console.log('🔄 Restarting Speech Recognition...');
             recognitionRef.current.start();
           } catch (e) {
-            console.log('Could not restart recognition:', e);
-            setIsListening(false);
+            console.log('Could not restart recognition immediately:', e);
           }
         }
       };
     }
-    
-    // Initialize Speech Synthesis and load voices
+
+    // Initialize Speech Synthesis
     if ('speechSynthesis' in window) {
       synthesisRef.current = window.speechSynthesis;
-      
-      // Load voices (some browsers need this)
       const loadVoices = () => {
-        const voices = synthesisRef.current.getVoices();
-        console.log('Available voices:', voices.map(v => v.name));
+        synthesisRef.current.getVoices();
+        console.log('Voices loaded');
       };
-      
       loadVoices();
       if (synthesisRef.current.onvoiceschanged !== undefined) {
         synthesisRef.current.onvoiceschanged = loadVoices;
       }
     }
-    
-    return () => {
-      if (recognitionRef.current) {
-        recognitionRef.current.stop();
-      }
-      if (synthesisRef.current) {
-        synthesisRef.current.cancel();
-      }
-    };
-  }, [isListening]);
 
-  // Function to speak question using TTS with female voice
-  const speakQuestion = useCallback((questionText) => {
-    if (!synthesisRef.current || !questionText) return;
-    
-    // Cancel any ongoing speech
-    synthesisRef.current.cancel();
-    
-    // Get available voices and select a female voice
-    const voices = synthesisRef.current.getVoices();
-    let selectedVoice = null;
-    
-    // Try to find a female voice (prefer English female voices)
-    const femaleVoices = voices.filter(voice => {
-      const name = voice.name.toLowerCase();
-      const lang = voice.lang.toLowerCase();
-      return lang.includes('en') && (
-        name.includes('female') || 
-        name.includes('samantha') || 
-        name.includes('karen') || 
-        name.includes('susan') ||
-        name.includes('zira') ||
-        name.includes('hazel') ||
-        name.includes('google uk english female') ||
-        name.includes('google us english female') ||
-        voice.gender === 'female'
-      );
-    });
-    
-    if (femaleVoices.length > 0) {
-      // Prefer high-quality voices
-      selectedVoice = femaleVoices.find(v => v.name.includes('premium')) || 
-                      femaleVoices.find(v => v.name.includes('enhanced')) ||
-                      femaleVoices[0];
+    // Audio Visualizer Setup
+    const setupVisualizer = () => {
+      if (streamRef.current && !analyserRef.current) {
+        try {
+          const audioContext = persistentAudioContextRef.current || new (window.AudioContext || window.webkitAudioContext)();
+          if (!persistentAudioContextRef.current) persistentAudioContextRef.current = audioContext;
+
+          const analyser = audioContext.createAnalyser();
+          analyser.fftSize = 256;
+          const bufferLength = analyser.frequencyBinCount;
+          const dataArray = new Uint8Array(bufferLength);
+
+          const source = audioContext.createMediaStreamSource(streamRef.current);
+          source.connect(analyser);
+
+          analyserRef.current = analyser;
+          dataArrayRef.current = dataArray;
+
+          const updateLevel = () => {
+            if (!analyserRef.current) return;
+            analyserRef.current.getByteFrequencyData(dataArrayRef.current);
+            let sum = 0;
+            for (let i = 0; i < dataArrayRef.current.length; i++) {
+              sum += dataArrayRef.current[i];
+            }
+            const average = sum / dataArrayRef.current.length;
+            setMicLevel(average);
+            animationFrameRef.current = requestAnimationFrame(updateLevel);
+          };
+          updateLevel();
+        } catch (e) {
+          console.error('Error setting up visualizer:', e);
+        }
+      }
+    };
+
+    if (mediaInitialized) {
+      setupVisualizer();
+    }
+
+    return () => {
+      if (recognitionRef.current) recognitionRef.current.stop();
+      if (synthesisRef.current) synthesisRef.current.cancel();
+      if (animationFrameRef.current) cancelAnimationFrame(animationFrameRef.current);
+      if (persistentAudioContextRef.current) {
+        persistentAudioContextRef.current.close();
+        persistentAudioContextRef.current = null;
+      }
+    };
+  }, [mediaInitialized]);
+
+  // Recognition is managed explicitly via setListening and startListening
+  /*
+  useEffect(() => {
+    if (!recognitionRef.current) return;
+  
+    if (isListening) {
+      try {
+        recognitionRef.current.start();
+        console.log('MIC ACTIVE');
+      } catch (e) {
+        // Recognition might already be started
+        console.warn('Recognition start error:', e.message);
+      }
     } else {
-      // Fallback: try any English voice that sounds female
-      selectedVoice = voices.find(v => 
-        v.lang.toLowerCase().includes('en') && 
-        (v.name.toLowerCase().includes('female') || v.name.toLowerCase().includes('samantha'))
-      ) || voices.find(v => v.lang.toLowerCase().includes('en'));
+      try {
+        recognitionRef.current.stop();
+        console.log('MIC INACTIVE');
+      } catch (e) {
+        console.warn('Recognition stop error:', e.message);
+      }
     }
-    
-    const utterance = new SpeechSynthesisUtterance(questionText);
-    utterance.rate = 0.85; // Slightly slower for sweet, clear speech
-    utterance.pitch = 1.2; // Higher pitch for female voice
-    utterance.volume = 1;
-    utterance.lang = 'en-US';
-    
-    if (selectedVoice) {
-      utterance.voice = selectedVoice;
-      console.log('Using voice:', selectedVoice.name);
-    }
-    
-    utterance.onstart = () => {
-      setIsSpeaking(true);
-    };
-    
-    utterance.onend = () => {
-      setIsSpeaking(false);
-      // Start listening after question is spoken
-      setTimeout(() => {
-        startListening();
-      }, 500);
-    };
-    
-    utterance.onerror = (event) => {
-      console.error('Speech synthesis error:', event.error);
-      setIsSpeaking(false);
-    };
-    
-    synthesisRef.current.speak(utterance);
-  }, []);
+  }, [isListening]);
+  */
 
   // Function to start listening for user answer
   const startListening = useCallback(() => {
-    if (!recognitionRef.current || isListening) return;
-    
+    if (!recognitionRef.current || isListeningRef.current) return;
+
     try {
       currentAnswerRef.current = '';
+      accumulatedTranscriptRef.current = ''; // Clear for new answer
       setUserAnswerSubtitle('');
-      recognitionRef.current.start();
-      setIsListening(true);
+
+      // Clear any existing transcripts to prevent "ghost" text
+      if (recognitionRef.current.abort) recognitionRef.current.abort();
+
+      setTimeout(() => {
+        if (recognitionRef.current) {
+          recognitionRef.current.start();
+          setListening(true);
+        }
+      }, 50);
+
+      // TRIGGER BACKGROUND PRE-LOADING OF NEXT QUESTION
+      if (!preloadedNextQuestion && currentQuestion && interviewStageRef.current === 'listening_for_answer') {
+        console.log('Background pre-loading next question...');
+      }
     } catch (error) {
       console.error('Error starting speech recognition:', error);
     }
-  }, [isListening]);
+  }, [preloadedNextQuestion, currentQuestion]);
+
+  // Function to speak question using TTS with female voice
+  const speakQuestion = useCallback((questionText) => {
+    if (!questionText) return;
+
+    // Dispatch event to the Avatar component
+    window.dispatchEvent(new CustomEvent("speak-text", { detail: { text: questionText } }));
+
+    // Listen for avatar speaking states to sync UI
+    const startSpeaking = () => setIsSpeaking(true);
+    const stopSpeaking = () => {
+      setIsSpeaking(false);
+      window.removeEventListener("avatar-speaking-start", startSpeaking);
+      window.removeEventListener("avatar-speaking-end", stopSpeaking);
+
+      // SHOW "SPEAK NOW" FOR 1 SECOND
+      setShowSpeakNow(true);
+      setTimeout(() => setShowSpeakNow(false), 1000);
+
+      // Transition logic
+      const currentStage = interviewStageRef.current;
+      if (currentStage === 'greeting' || currentStage === 'initial' || currentStage === 'question_speaking') {
+        const isActuallyGreeting = currentQuestion?.question_id === 'GREETING' || currentQuestion?.type === 'greeting';
+
+        if ((currentStage === 'greeting' || currentStage === 'initial') && isActuallyGreeting) {
+          if (questions && questions.length > 1) {
+            const q1 = questions[1];
+            setCurrentQuestion(q1);
+            setQuestionSubtitle(q1.question);
+            setStage('question_speaking');
+            setTimeout(() => speakQuestion(q1.question), 50);
+          }
+        } else {
+          const isClosing = currentQuestion?.question_id === 'CLOSING' || currentQuestion?.type === 'closing';
+          if (isClosing) {
+            setStage('completed');
+            setTimeout(() => {
+              navigate('/feedback', { state: { sessionId, questionFeedback } });
+            }, 5000);
+            return;
+          }
+
+          setStage('listening_for_answer');
+          setTimeout(() => startListening(), 50);
+        }
+      }
+    };
+
+    window.addEventListener("avatar-speaking-start", startSpeaking);
+    window.addEventListener("avatar-speaking-end", stopSpeaking);
+
+  }, [interviewStage, startListening, currentQuestion, questions, sessionId, questionFeedback, navigate]);
+
+  // TRIGGER BACKGROUND PRE-LOADING OF NEXT QUESTION
+  useEffect(() => {
+    if (interviewStage === 'listening_for_answer' && !preloadedNextQuestion && currentQuestion && sessionId) {
+      const triggerPrefetch = async () => {
+        // PREFETCH DISABLED TEMPORARILY - CAUSING HISTORY SPAM
+        /*
+        try {
+          console.log('Proactively pre-fetching next question in background...');
+          // Using a special flag so backend knows it's a prefetch
+          // and doesn't finalize the answer yet, but returns a potential next question
+          const result = await saveUserResponse({
+            sessionId: sessionId,
+            questionId: currentQuestion.question_id,
+            questionText: currentQuestion.question,
+            userAnswer: "PREFETCHING",
+            isPrefetch: true
+          });
+  
+          if (result.success && result.data && result.data.next_question) {
+            console.log('Background pre-fetch succeeded:', result.data.next_question.question_id);
+            setPreloadedNextQuestion(result.data.next_question);
+          }
+        } catch (e) {
+          console.warn('Background pre-fetch failed or not supported:', e.message);
+        }
+        */
+      };
+
+      const timer = setTimeout(triggerPrefetch, 2000); // Start pre-fetching 2s into their answer
+      return () => clearTimeout(timer);
+    }
+  }, [interviewStage, preloadedNextQuestion, sessionId, currentQuestion]);
+
+
+
+  const formatStructuredSpeech = (text) => {
+    if (!text) return "";
+    let formatted = text;
+
+    // Convert "first one is", "second one is", "firstly", "secondly" to bullet points
+    const bulletKeywords = [
+      { regex: /firstly|first one is|first point is/gi, bullet: "\n• First Point: " },
+      { regex: /secondly|second one is|second point is/gi, bullet: "\n• Second Point: " },
+      { regex: /thirdly|third one is|third point is/gi, bullet: "\n• Third Point: " },
+      { regex: /finally|lastly|last point is/gi, bullet: "\n• Final Point: " }
+    ];
+
+    bulletKeywords.forEach(item => {
+      formatted = formatted.replace(item.regex, item.bullet);
+    });
+
+    // Handle "which involves" as an explanation connector
+    formatted = formatted.replace(/which involves/gi, "\n  ↳ (Explanation): which involves");
+
+    return formatted.trim();
+  };
+
+  const handleEndInterview = useCallback(async (force = false) => {
+    if (force || window.confirm('Are you sure you want to end the interview? Progress will be saved.')) {
+      try {
+        await endInterview(sessionId);
+        navigate('/feedback', { state: { sessionId, questionFeedback } });
+      } catch (error) {
+        console.error('Error ending interview:', error);
+        navigate('/feedback', { state: { sessionId, questionFeedback } });
+      }
+    }
+  }, [sessionId, questionFeedback, navigate]);
+
+  // Function to move to next question (called after feedback)
+  const handleNextQuestion = useCallback(() => {
+    setLastQuestionFeedback(null);
+
+    const currentIdx = questions.findIndex(q => q.question_id === currentQuestion.question_id);
+    const nextIdx = currentIdx + 1;
+
+    // Auto-end if we have asked 5 questions (or more)
+    if (nextIdx >= 5) {
+      setStage('completed');
+      handleEndInterview(true);
+      return;
+    }
+
+    let nextQ = null;
+
+    if (nextIdx < questions.length) {
+      nextQ = questions[nextIdx];
+    }
+
+    if (nextQ) {
+      if (nextQ.question_id === 'CLOSING' || nextQ.type === 'closing') {
+        setStage('completed');
+        setQuestionSubtitle(nextQ.question);
+        speakQuestion(nextQ.question);
+        setTimeout(() => {
+          handleEndInterview(true);
+        }, 8000);
+      } else {
+        setCurrentQuestion(nextQ);
+        setCurrentQuestionIndex(nextIdx);
+        setQuestionSubtitle(nextQ.question || '');
+        setUserAnswerSubtitle('');
+        setStage('question_speaking');
+        setTimeout(() => speakQuestion(nextQ.question), 250);
+      }
+    } else {
+      setStage('completed');
+      handleEndInterview(true);
+    }
+  }, [currentQuestion, questions, sessionId, questionFeedback, navigate, speakQuestion, handleEndInterview]);
 
   // Function to stop listening and save answer
   const stopListeningAndSave = useCallback(async () => {
-    if (!recognitionRef.current || !isListening) return;
-    
+    if (!recognitionRef.current || !isListeningRef.current) return;
+
+    // 1. STOP Recognition
     recognitionRef.current.stop();
-    setIsListening(false);
-    
-    const userAnswer = currentAnswerRef.current.trim();
-    if (!userAnswer || !currentQuestion) return;
-    
-    // Find ideal answer for current question
+    setListening(false);
+    setIsProcessing(true);
+    setStage('processing');
+
+    // 2. Capture user answer and current question context
+    // 2. Capture and format user answer
+    const rawAnswer = currentAnswerRef.current.trim();
+
+    // AUTOMATIC REFINEMENT (Quillbot-style)
+    let refinedAnswer = rawAnswer;
+    if (rawAnswer.length > 5) {
+      try {
+        setUserAnswerSubtitle("✨ Enhancing your answer..."); // Visual feedback
+        const refineResponse = await axios.post(`${API_BASE_URL}/api/gemini/refine-transcript/`, {
+          text: rawAnswer
+        });
+        if (refineResponse.data && refineResponse.data.refined_text) {
+          refinedAnswer = refineResponse.data.refined_text;
+          console.log("Auto-Refined:", refinedAnswer);
+          setUserAnswerSubtitle(refinedAnswer); // Show refined version briefly
+          addToast({ title: 'Enhanced', description: 'AI has refined your speech for clarity.' }, 'info', 2000);
+        }
+      } catch (refineErr) {
+        console.error("Auto-refinement failed, using raw:", refineErr);
+      }
+    }
+
+    const userAnswer = formatStructuredSpeech(refinedAnswer);
+    const qToSave = currentQuestion;
+
+    if (!userAnswer || !qToSave) {
+      setIsProcessing(false);
+      setStage('listening_for_answer');
+      return;
+    }
+
     const idealAnswerData = idealAnswers.find(
-      ans => ans.question_id === currentQuestion.question_id
+      ans => ans.question_id === qToSave.question_id
     );
-    
-    // Save response to backend
+
     try {
+      // 3. SAVE and Wait for Feedback
       const result = await saveUserResponse({
-        sessionId: sessionId,
-        questionId: currentQuestion.question_id,
-        questionText: currentQuestion.question,
-        userAnswer: userAnswer,
+        sessionId,
+        questionId: qToSave.question_id,
+        questionText: qToSave.question,
+        userAnswer, // Uses the refined Answer
+        posture: postureLabel,
+        emotion: dominantEmotion,
+        confidence: emotionConfidence,
         idealAnswer: idealAnswerData?.ideal_answer || null,
         alternativeAnswers: idealAnswerData?.alternative_answers || []
       });
-      
+
       if (result.success) {
-        console.log('Response saved successfully');
-        
-        // Move to next question
-        const nextIndex = currentQuestionIndex + 1;
-        if (nextIndex < questions.length) {
-          setCurrentQuestionIndex(nextIndex);
-          setCurrentQuestion(questions[nextIndex]);
-          setQuestionSubtitle(questions[nextIndex].question || '');
-          setUserAnswerSubtitle('');
-          
-          // Speak next question after a short delay
-          setTimeout(() => {
-            speakQuestion(questions[nextIndex].question);
-          }, 1000);
-        } else {
-          console.log('All questions completed');
-          // Handle interview completion
+        setTotalQuestionsAsked(prev => prev + 1);
+
+        if (result.feedback) {
+          const feedbackItem = {
+            ...result.feedback,
+            question: qToSave.question,
+            user_answer: userAnswer
+          };
+          setQuestionFeedback(prev => [...prev, feedbackItem]);
         }
+
+        // Always proceed to next question (no intermediate feedback)
+        setIsProcessing(false);
+        addToast({ title: 'Answer Saved', description: 'Your response has been recorded.' }, 'success', 2000);
+        handleNextQuestion();
+      } else {
+        // Save failed, still proceed
+        setIsProcessing(false);
+        addToast({ title: 'Saved with Warning', description: 'Response saved locally but sync failed.' }, 'warning', 3000);
+        handleNextQuestion();
       }
     } catch (error) {
-      console.error('Error saving response:', error);
+      console.error('Error in save flow:', error);
+      setIsProcessing(false);
+      addToast({ title: 'Error Saving', description: 'Could not save your response. Proceeding...' }, 'error', 3000);
+      handleNextQuestion();
     }
-  }, [isListening, currentQuestion, currentQuestionIndex, questions, idealAnswers, sessionId, speakQuestion]);
 
-  // Auto-speak question when it changes
+  }, [isListening, currentQuestion, questions, idealAnswers, sessionId, handleNextQuestion, postureLabel, dominantEmotion, emotionConfidence, addToast]);
+
+
+  // handleEndInterview moved up
+
+  // Handle Greeting and Start Logic
   useEffect(() => {
-    if (currentQuestion && currentQuestion.question) {
+    // Stage 1: Initial Greeting from Backend
+    if (mediaInitialized && questions.length > 0 && interviewStage === 'initial') {
+      const greetingQ = questions[0];
+
+      setStage('greeting');
+      setCurrentQuestion(greetingQ);
+      setQuestionSubtitle(greetingQ.question);
+
+      // Speak the greeting from backend
+      setTimeout(() => {
+        speakQuestion(greetingQ.question);
+      }, 1500);
+    }
+  }, [mediaInitialized, questions, candidateInfo, speakQuestion, interviewStage]);
+
+  // Keyword detection removed for auto-start
+
+  // Auto-speak question only if NOT initial (handled by logic above)
+  /*
+  useEffect(() => {
+    if (currentQuestion && currentQuestion.question && interviewStage === 'question_speaking') {
       // Small delay before speaking
       const timer = setTimeout(() => {
         speakQuestion(currentQuestion.question);
       }, 500);
-      
+   
       return () => clearTimeout(timer);
     }
-  }, [currentQuestion, speakQuestion]);
+  }, [currentQuestion, speakQuestion, interviewStage]);
+  */
 
   // Function to capture frame from video and convert to base64
   const captureFrame = () => {
@@ -427,185 +809,68 @@ function Interview() {
     return canvas.toDataURL('image/jpeg', 0.8);
   };
 
-  // Function to capture audio chunk using MediaRecorder (for speaker detection - shorter)
+  // Function to capture audio chunk using AudioContext (for speaker detection - shorter)
   const captureAudioChunk = useCallback(async () => {
     if (!streamRef.current || !micEnabled) {
       return null;
     }
 
     try {
-      const audioTracks = streamRef.current.getAudioTracks();
-      if (audioTracks.length === 0 || !audioTracks[0].enabled) {
-        return null;
+      // Ensure we have a persistent AudioContext
+      if (!persistentAudioContextRef.current) {
+        persistentAudioContextRef.current = new (window.AudioContext || window.webkitAudioContext)();
       }
 
-      // Create a new MediaRecorder for this chunk
-      const audioStream = new MediaStream([audioTracks[0]]);
-      const recorder = new MediaRecorder(audioStream, {
-        mimeType: 'audio/webm;codecs=opus'
-      });
-
-      return new Promise((resolve) => {
-        const chunks = [];
-        
-        recorder.ondataavailable = (event) => {
-          if (event.data.size > 0) {
-            chunks.push(event.data);
-          }
-        };
-
-        recorder.onstop = () => {
-          const blob = new Blob(chunks, { type: 'audio/webm' });
-          const reader = new FileReader();
-          
-          reader.onloadend = () => {
-            const base64 = reader.result.split(',')[1];
-            resolve(base64);
-          };
-          
-          reader.readAsDataURL(blob);
-        };
-
-        // Record for 0.5 seconds (for speaker detection)
-        recorder.start();
-        setTimeout(() => {
-          recorder.stop();
-        }, 500);
-      });
+      // Record for 1.5 seconds using the persistent context (good for both speaker & emotion)
+      return await recordAudioAsWav(streamRef.current, 1500, persistentAudioContextRef.current);
     } catch (err) {
       console.error('Error capturing audio:', err);
       return null;
     }
   }, [micEnabled]);
 
-  // Function to capture longer audio chunk for emotion detection (1.5 seconds)
-  const captureAudioChunkForEmotion = useCallback(async () => {
-    if (!streamRef.current || !micEnabled) {
-      return null;
-    }
+  // Function to save user response to backend
 
-    try {
-      const audioTracks = streamRef.current.getAudioTracks();
-      if (audioTracks.length === 0 || !audioTracks[0].enabled) {
-        return null;
-      }
 
-      // Create a new MediaRecorder for this chunk
-      const audioStream = new MediaStream([audioTracks[0]]);
-      const recorder = new MediaRecorder(audioStream, {
-        mimeType: 'audio/webm;codecs=opus'
-      });
+  // Consolidated function to send audio chunk for both speaker and emotion detection
+  const sendAudioBoth = useCallback(async (audioBase64) => {
+    if (!audioBase64 || !micEnabled) return;
 
-      return new Promise((resolve) => {
-        const chunks = [];
-        
-        recorder.ondataavailable = (event) => {
-          if (event.data.size > 0) {
-            chunks.push(event.data);
-          }
-        };
-
-        recorder.onstop = () => {
-          const blob = new Blob(chunks, { type: 'audio/webm' });
-          const reader = new FileReader();
-          
-          reader.onloadend = () => {
-            const base64 = reader.result.split(',')[1];
-            resolve(base64);
-          };
-          
-          reader.readAsDataURL(blob);
-        };
-
-        // Record for 1.5 seconds (for emotion detection - model needs 1.3s)
-        recorder.start();
-        setTimeout(() => {
-          recorder.stop();
-        }, 1500);
-      });
-    } catch (err) {
-      console.error('Error capturing audio for emotion:', err);
-      return null;
-    }
-  }, [micEnabled]);
-
-  // Function to send audio chunk to backend for speaker detection
-  const sendAudioForDetection = useCallback(async (audioBase64) => {
-    if (!audioBase64 || !micEnabled) {
+    // GATED: Don't detect during final processing
+    if (isProcessing) {
+      setDominantEmotion('CALIBRATING...');
       return;
     }
 
     try {
-      const response = await axios.post(`${API_BASE_URL}/api/detections/speakers/`, {
+      const response = await axios.post(`${API_BASE_URL}/api/detections/both_audio/`, {
         audio: audioBase64,
         session_id: sessionId,
         sampling_rate: 16000
       }, {
-        headers: {
-          'Content-Type': 'application/json',
-        }
+        headers: { 'Content-Type': 'application/json' }
       });
 
       if (response.data.success) {
-        const result = response.data;
-        console.log('Speaker detection result:', result);
-        setHasSpeech(result.has_speech);
-        
-        if (result.has_speech) {
-          setSpeakerStatus(result.is_multiple_speakers ? 'multiple' : 'single');
-          setSpeakerConfidence(result.confidence);
-        } else {
-          setSpeakerStatus(null);
-          setSpeakerConfidence(null);
+        const { speaker, emotion } = response.data;
+
+        // Update Speaker State
+        setHasSpeech(speaker.has_speech);
+        setSpeakerStatus(speaker.is_multiple_speakers ? 'multiple' : 'single');
+        if (speaker.is_interviewee !== undefined) {
+          setIsInterviewee(speaker.is_interviewee);
+        }
+
+        // Update Emotion State
+        if (emotion.dominant_emotion && emotion.has_speech) {
+          setDominantEmotion(emotion.dominant_emotion);
+          setEmotionConfidence(emotion.confidence || 0);
         }
       }
     } catch (err) {
-      console.error('Speaker detection error:', err);
-      console.error('Error details:', err.response?.data || err.message);
-      // Don't show error to user for every failed detection
+      console.error('Merged audio detection error:', err);
     }
-  }, [micEnabled, sessionId]);
-
-  // Function to send audio chunk to backend for emotion detection
-  const sendAudioForEmotionDetection = useCallback(async (audioBase64) => {
-    if (!audioBase64 || !micEnabled) {
-      return;
-    }
-
-    try {
-      console.log('Sending audio for emotion detection...');
-      const response = await axios.post(`${API_BASE_URL}/api/detections/emotion/`, {
-        audio: audioBase64,
-        session_id: sessionId,
-        sampling_rate: 16000
-      }, {
-        headers: {
-          'Content-Type': 'application/json',
-        }
-      });
-
-      if (response.data.success) {
-        const result = response.data;
-        console.log('Emotion detection result:', result);
-        // Always update emotion state if we got a valid result from backend
-        // Backend already filters low confidence results, so trust its output
-        if (result.dominant_emotion) {
-          console.log('✅ Setting emotion state:', result.dominant_emotion, 'confidence:', result.confidence);
-          setDominantEmotion(result.dominant_emotion);
-          setEmotionProbabilities(result.emotion_probabilities || {});
-          setEmotionConfidence(result.confidence || 0);
-        } else {
-          console.log('No dominant emotion in result');
-        }
-      } else {
-        console.log('Emotion detection API returned success: false');
-      }
-    } catch (err) {
-      console.error('Emotion detection error:', err);
-      console.error('Error details:', err.response?.data || err.message);
-      // Don't show error to user for every failed detection
-    }
-  }, [micEnabled, sessionId]);
+  }, [micEnabled, sessionId, isProcessing]);
 
   // Function to send frame to backend for detection
   const sendFrameForDetection = useCallback(async () => {
@@ -618,7 +883,7 @@ function Interview() {
       setIsDetecting(true);
       console.log('Sending frame for detection...');
       const imageBase64 = captureFrame();
-      
+
       if (!imageBase64) {
         setIsDetecting(false);
         return;
@@ -639,12 +904,10 @@ function Interview() {
         console.log('Detection results:', response.data);
         if (response.data.posture && response.data.posture.posture_label) {
           setPostureLabel(response.data.posture.posture_label);
-          setPostureConfidence(response.data.posture.confidence);
           console.log('Posture detected:', response.data.posture.posture_label);
         } else {
           // Clear posture if not detected
           setPostureLabel(null);
-          setPostureConfidence(null);
         }
         if (response.data.faces !== undefined) {
           const faceCountValue = response.data.faces.face_count || 0;
@@ -661,39 +924,15 @@ function Interview() {
     }
   }, [cameraEnabled, isDetecting, sessionId]);
 
-  useEffect(() => {
-    const fetchData = async () => {
-      const username = 'aWJkZWlvZnZ4Z2Foa29sd3B1QHhmYXZhai5jb20';
-      const password = '-LQno4iP98zcC_2_d2b_P:vk8pXF6N8Nop1Zxy7v-5B'; 
-      const url = 'https://api.d-id.com/agents/v2_agt_DAKUHOVa'
-      try {
-        const response = await axios.get(url, {
-          auth: {
-            username: username,
-            password: password,
-          },
-        });
-        setInterview(response.data);
-      } catch (err) {
-        console.error('API Error:', err);
-        setError('Failed to fetch interview data');
-      }
-    };
-
-    // Only fetch if we have valid credentials
-    // For now, let's comment this out to prevent blocking the UI
-    // fetchData();
-  }, []);
-
-  // Initialize camera and microphone
-  const initializeMedia = async () => {
+  // Consolidate mount effects
+  const initializeMedia = useCallback(async () => {
     try {
       console.log('Requesting media access...');
-      
+
       // Request microphone access first (for interviewee)
       let audioStream = null;
       try {
-        audioStream = await navigator.mediaDevices.getUserMedia({ 
+        audioStream = await navigator.mediaDevices.getUserMedia({
           audio: {
             echoCancellation: true,
             noiseSuppression: true,
@@ -707,12 +946,12 @@ function Interview() {
         setError(`Microphone access error: ${audioErr.message}. Please allow microphone access to continue the interview.`);
         return;
       }
-      
+
       // Request camera access
       let videoStream = null;
       try {
-        videoStream = await navigator.mediaDevices.getUserMedia({ 
-          video: { 
+        videoStream = await navigator.mediaDevices.getUserMedia({
+          video: {
             width: { ideal: 1280 },
             height: { ideal: 720 },
             facingMode: 'user'
@@ -723,7 +962,7 @@ function Interview() {
         console.warn('Camera access error:', videoErr);
         // Continue without camera if user denies
       }
-      
+
       // Combine streams
       const tracks = [];
       if (audioStream) {
@@ -732,175 +971,85 @@ function Interview() {
       if (videoStream) {
         tracks.push(...videoStream.getVideoTracks());
       }
-      
+
       const combinedStream = new MediaStream(tracks);
       streamRef.current = combinedStream;
-      
+
       // Set states based on available tracks
       const hasAudio = audioStream !== null && audioStream.getAudioTracks().length > 0;
       const hasVideo = videoStream !== null && videoStream.getVideoTracks().length > 0;
-      
+
       setMicEnabled(hasAudio);
       setCameraEnabled(hasVideo);
       setMediaInitialized(true);
       setError(null);
-      
+      addToast({ title: 'System Ready', description: 'Camera and Microphone connected successfully.' }, 'success', 3000);
+
+      // CRITICAL: Attach stream to video element
+      if (videoRef.current) {
+        videoRef.current.srcObject = combinedStream;
+      }
+
       // Log track states
       console.log('Video tracks:', combinedStream.getVideoTracks());
       console.log('Audio tracks:', combinedStream.getAudioTracks());
       console.log('Microphone enabled:', hasAudio);
       console.log('Camera enabled:', hasVideo);
-      
+
     } catch (err) {
       console.error('Error accessing media devices:', err);
       setError(`Media access error: ${err.message}. Please allow camera and microphone access.`);
       setMediaInitialized(false);
     }
-  };
+  }, [addToast]);
 
-  // Start recording
-  const startRecording = () => {
-    if (!streamRef.current) {
-      console.log('No stream available, initializing media...');
-      initializeMedia();
-      return;
-    }
-
-    try {
-      recordedChunksRef.current = [];
-      mediaRecorderRef.current = new MediaRecorder(streamRef.current);
-      
-      mediaRecorderRef.current.ondataavailable = (event) => {
-        if (event.data.size > 0) {
-          recordedChunksRef.current.push(event.data);
-        }
-      };
-      
-      mediaRecorderRef.current.onstop = () => {
-        const blob = new Blob(recordedChunksRef.current, { type: 'video/webm' });
-        console.log('Recording stopped, blob created:', blob);
-      };
-      
-      mediaRecorderRef.current.start();
-      setIsRecording(true);
-      console.log('Recording started');
-      
-      // Note: Detection is already running continuously when camera is enabled
-    } catch (err) {
-      console.error('Error starting recording:', err);
-      setError('Failed to start recording');
-    }
-  };
-
-  // Stop recording
-  const stopRecording = () => {
-    if (mediaRecorderRef.current && mediaRecorderRef.current.state === 'recording') {
-      mediaRecorderRef.current.stop();
-      setIsRecording(false);
-      console.log('Recording stopped');
-      
-      // Note: Detection continues running when camera is enabled
-    }
-  };
-
-  // Toggle camera
-  const toggleCamera = () => {
-    if (streamRef.current) {
-      const videoTrack = streamRef.current.getVideoTracks()[0];
-      if (videoTrack) {
-        videoTrack.enabled = !videoTrack.enabled;
-        setCameraEnabled(videoTrack.enabled);
-        console.log('Camera toggled:', videoTrack.enabled);
-      }
-    }
-  };
-
-  // Toggle microphone
-  const toggleMicrophone = () => {
-    if (streamRef.current) {
-      const audioTrack = streamRef.current.getAudioTracks()[0];
-      if (audioTrack) {
-        audioTrack.enabled = !audioTrack.enabled;
-        setMicEnabled(audioTrack.enabled);
-        console.log('Microphone toggled:', audioTrack.enabled);
-      }
-    }
-  };
-
-  // Cleanup on component unmount
   useEffect(() => {
-    return () => {
-      if (streamRef.current) {
-        console.log('Cleaning up media streams');
-        streamRef.current.getTracks().forEach(track => track.stop());
-      }
-      // Clear detection intervals
-      if (detectionIntervalRef.current) {
-        clearInterval(detectionIntervalRef.current);
-      }
-      if (audioIntervalRef.current) {
-        clearInterval(audioIntervalRef.current);
-      }
-      // Cleanup audio context
-      if (audioContextRef.current) {
-        audioContextRef.current.close().catch(console.error);
-      }
-    };
-  }, []);
-
-  // Auto-initialize media when component mounts
-  useEffect(() => {
-    console.log('Component mounted, initializing media...');
     initializeMedia();
-  }, []);
+  }, [initializeMedia]);
 
   // Effect to attach stream to video element when both are available
   useEffect(() => {
     if (videoRef.current && streamRef.current && mediaInitialized) {
       console.log('Attaching stream to video element...');
       videoRef.current.srcObject = streamRef.current;
-      
+
       videoRef.current.onloadedmetadata = () => {
-        console.log('Video metadata loaded');
         setStreamReady(true);
       };
-      
+
       videoRef.current.oncanplay = () => {
-        console.log('Video can play');
         videoRef.current.play().catch(console.error);
       };
-      
-      // Trigger play immediately if possible
+
       videoRef.current.play().catch(console.error);
     }
-  }, [mediaInitialized, streamRef.current]);
+  }, [mediaInitialized]);
 
   // Effect to start/stop continuous detection based on camera status
   useEffect(() => {
-    // Start detection when camera is enabled and stream is ready
-    if (cameraEnabled && streamReady && mediaInitialized) {
+    // Start detection when camera is enabled and media is initialized
+    if (cameraEnabled && mediaInitialized) {
       console.log('Starting continuous face and posture detection...');
-      
+
       // Clear any existing interval
       if (detectionIntervalRef.current) {
         clearInterval(detectionIntervalRef.current);
       }
-      
-      // Start detection interval (every 1 second)
+
+      // Start detection interval (every 5 seconds)
       detectionIntervalRef.current = setInterval(() => {
-        if (cameraEnabled && !isDetecting) {
+        if (cameraEnabled) {
           sendFrameForDetection();
         }
-      }, 1000);
-      
+      }, 5000);
+
       // Also run detection immediately
       setTimeout(() => {
-        if (cameraEnabled && !isDetecting) {
+        if (cameraEnabled) {
           sendFrameForDetection();
         }
       }, 500);
-      
-      // Cleanup function
+
       return () => {
         if (detectionIntervalRef.current) {
           console.log('Stopping continuous detection...');
@@ -909,56 +1058,45 @@ function Interview() {
         }
       };
     } else {
-      // Stop detection if camera is disabled
       if (detectionIntervalRef.current) {
-        console.log('Stopping detection - camera disabled or stream not ready');
         clearInterval(detectionIntervalRef.current);
         detectionIntervalRef.current = null;
       }
     }
-  }, [cameraEnabled, streamReady, mediaInitialized, isDetecting, sendFrameForDetection]);
+  }, [cameraEnabled, mediaInitialized]);
 
   // Effect to start/stop continuous audio detection based on mic status
   useEffect(() => {
-    // Start audio detection when mic is enabled and stream is ready
-    if (micEnabled && streamReady && mediaInitialized) {
+    // Start audio detection when mic is enabled and media is initialized
+    if (micEnabled && mediaInitialized && backgroundDetectionEnabled) {
       console.log('Starting continuous audio detection...');
-      
+      console.log('Starting background audio detection interval');
+
       // Clear any existing interval
       if (audioIntervalRef.current) {
         clearInterval(audioIntervalRef.current);
       }
-      
+
       // Reset emotion counter
       emotionCounterRef.current = 0;
-      
-      // Start audio detection interval (every 0.5 seconds for speaker, 1.5 seconds for emotion)
+
       audioIntervalRef.current = setInterval(async () => {
-        if (!micEnabled) {
+        // GATED: Only detect emotion/speaker when Gemini is listening for an answer
+        if (!micEnabled || interviewStageRef.current !== 'listening_for_answer') {
           return;
         }
-        
+
         try {
-          // Always capture short chunk for speaker detection
+          // Capture audio chunk for speaker and emotion detection simultaneously
           const audioBase64 = await captureAudioChunk();
           if (audioBase64) {
-            sendAudioForDetection(audioBase64);
-          }
-          
-          // Capture longer chunk for emotion detection every 3rd iteration (every 1.5 seconds)
-          emotionCounterRef.current++;
-          if (emotionCounterRef.current >= 3) {
-            emotionCounterRef.current = 0;
-            const emotionAudioBase64 = await captureAudioChunkForEmotion();
-            if (emotionAudioBase64) {
-              sendAudioForEmotionDetection(emotionAudioBase64);
-            }
+            sendAudioBoth(audioBase64);
           }
         } catch (error) {
           console.error('Error in audio detection interval:', error);
         }
-      }, 500);
-      
+      }, 2500); // Reduced frequency (2.5s) to prevent server saturation
+
       // Cleanup function
       return () => {
         if (audioIntervalRef.current) {
@@ -966,29 +1104,17 @@ function Interview() {
           clearInterval(audioIntervalRef.current);
           audioIntervalRef.current = null;
         }
+        // Reset emotion counter when mic is disabled
+        emotionCounterRef.current = 0;
       };
-    } else {
-      // Stop audio detection if mic is disabled
-      if (audioIntervalRef.current) {
-        clearInterval(audioIntervalRef.current);
-        audioIntervalRef.current = null;
-      }
-      // Reset speaker and emotion status when mic is disabled
-      setSpeakerStatus(null);
-      setSpeakerConfidence(null);
-      setHasSpeech(false);
-      setDominantEmotion(null);
-      setEmotionProbabilities(null);
-      setEmotionConfidence(null);
     }
-  }, [micEnabled, streamReady, mediaInitialized, captureAudioChunk, captureAudioChunkForEmotion, sendAudioForDetection, sendAudioForEmotionDetection]);
+  }, [micEnabled, mediaInitialized, captureAudioChunk, sendAudioBoth, backgroundDetectionEnabled]);
 
   console.log('Current state:', {
     mediaInitialized,
     cameraEnabled,
     micEnabled,
     streamReady,
-    hasStream: !!streamRef.current,
     dominantEmotion,
     emotionConfidence
   });
@@ -1004,500 +1130,574 @@ function Interview() {
 
   return (
     <>
-      {/* Nav-bar */}
-      <Navbar />
+      <Background3D />
+      <Navbar minimal={true} />
 
-      {/* Content */}
-      <div className="progress">
-        <div className="progress-top">
-          <div>
-            <i className="fa fa-circle redd" aria-hidden="true"></i> 
-            <span className='live-text'>Live Interview Session</span>
-            <span className='decorative-text'>Behavioral Interview</span>
+      <div className="interview-container">
+        {/* Status Area */}
+        <div className="status-bars-container">
+          <div className="breadcrumb-bar">
+            <div className="breadcrumb-content">
+              <span className="live-indicator"><span className="live-dot"></span> Live Interview Session</span>
+              <span className="session-badge">Behavioral Interview</span>
+            </div>
+            <div className="breadcrumb-meta">
+              Question {Math.min(totalQuestionsAsked + 1, 5)} of 5
+            </div>
           </div>
-          <div>
-            Question {currentQuestionIndex + 1} of {questions.length || 1}
+
+          <div className="diagnostic-bar">
+            <div className="diag-item">
+              Posture: <span className={`diag-pill ${(postureLabel && postureLabel.toLowerCase() === 'appropriate') ? 'green' : (postureLabel) ? 'red' : 'red'}`}>
+                {postureLabel ? (postureLabel.toLowerCase() === 'appropriate' ? 'APPROPRIATE ✓' : postureLabel.toUpperCase()) : 'NONE'}
+              </span>
+            </div>
+            <div className="diag-item">
+              Face Detection: <span className={`diag-pill ${faceCount === 1 ? 'green' : 'red'}`}>
+                {faceCount === 1 ? 'SINGLE FACE \u2713' : faceCount > 1 ? 'MULTIPLE' : 'NONE'}
+              </span>
+            </div>
+            <div className="diag-item">
+              Multiple Speakers: <span className={`diag-pill ${speakerStatus === 'single' ? 'green' : 'red'}`}>
+                {speakerStatus === 'multiple' ? 'MULTIPLE VOICES' : 'SINGLE VOICE \u2713'}
+              </span>
+            </div>
+            <div className="diag-item">
+              Identified Speaker: <span className={`diag-pill ${isInterviewee ? 'green' : 'red'}`}>
+                {isInterviewee ? 'INTERVIEWEE \u2713' : 'UNIDENTIFIED'}
+              </span>
+            </div>
+            <div className="diag-item">
+              Emotion: <span className={`diag-pill ${hasSpeech ? 'grey' : 'light-grey'}`}>
+                {hasSpeech ? (dominantEmotion || 'NEUTRAL').toUpperCase() : 'SILENCED'} ({hasSpeech ? `${emotionConfidence}%` : '---'})
+              </span>
+            </div>
           </div>
         </div>
-        <div className="progress-bottom">
-          <div className="bar"></div>
-        </div>
-        {/* Detection Summary */}
-        {(postureLabel || (mediaInitialized && cameraEnabled) || (mediaInitialized && micEnabled && (speakerStatus !== null || dominantEmotion))) && (
-          <div style={{
-            marginTop: '15px',
-            padding: '12px',
-            background: '#f8f9fa',
-            borderRadius: '8px',
+
+
+        {/* Feedback Overlay when question is answered */}
+        {interviewStage === 'showing_feedback' && lastQuestionFeedback && (
+          <div className="feedback-overlay" style={{
+            position: 'fixed',
+            inset: 0,
+            background: 'rgba(0,0,0,0.85)',
+            zIndex: 2000,
             display: 'flex',
-            gap: '20px',
-            flexWrap: 'wrap',
-            alignItems: 'center'
+            justifyContent: 'center',
+            alignItems: 'center',
+            padding: '20px'
           }}>
-            {postureLabel && (
-              <div style={{
-                display: 'flex',
-                alignItems: 'center',
-                gap: '8px'
-              }}>
-                <span style={{ fontSize: '12px', color: '#7f8c8d', fontWeight: '500' }}>Posture:</span>
-                <span style={{
-                  padding: '4px 12px',
-                  borderRadius: '12px',
-                  fontSize: '13px',
-                  fontWeight: 'bold',
-                  color: 'white',
-                  background: postureLabel === 'appropriate' ? '#2ecc71' : 
-                             postureLabel === 'cheating' ? '#ff4757' : 
-                             '#ffa502'
-                }}>
-                  {postureLabel.toUpperCase()}
-                </span>
+            <div className="feedback-card" style={{
+              background: 'rgba(30,30,40,0.95)',
+              backdropFilter: 'blur(20px)',
+              border: '1px solid rgba(255,255,255,0.1)',
+              borderRadius: '24px',
+              width: '100%',
+              maxWidth: '800px',
+              maxHeight: '90vh',
+              overflowY: 'auto',
+              padding: '30px',
+              position: 'relative',
+              animation: 'fadeInUp 0.4s ease-out',
+              color: 'white'
+            }}>
+              <h2 style={{ color: '#6c5ce7', marginBottom: '10px', display: 'flex', alignItems: 'center', gap: '10px' }}>
+                <i className="fa fa-commenting"></i> Question Feedback
+              </h2>
+              <div style={{ background: '#f8f9fa', padding: '15px', borderRadius: '12px', marginBottom: '20px' }}>
+                <p style={{ fontWeight: 700, margin: '0 0 5px 0' }}>Q: {lastQuestionFeedback.question}</p>
+                <p style={{ fontStyle: 'italic', margin: 0 }}>Your Answer: "{lastQuestionFeedback.user_answer}"</p>
               </div>
-            )}
-            {mediaInitialized && cameraEnabled && (
-              <div style={{
-                display: 'flex',
-                alignItems: 'center',
-                gap: '8px'
-              }}>
-                <span style={{ fontSize: '12px', color: '#7f8c8d', fontWeight: '500' }}>Face Detection:</span>
-                <span style={{
-                  padding: '4px 12px',
-                  borderRadius: '12px',
-                  fontSize: '13px',
-                  fontWeight: 'bold',
-                  color: 'white',
-                  background: faceCount === 0 ? '#95a5a6' :
-                             faceCount > 1 ? '#ff4757' : 
-                             '#2ecc71'
-                }}>
-                  {faceCount === 0 ? 'NO FACE' : 
-                   faceCount === 1 ? 'SINGLE FACE ✓' : 
-                   `${faceCount} FACES - WARNING!`}
-                </span>
+
+              <div className="feedback-metrics-row" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: '15px', marginBottom: '20px' }}>
+                <div style={{ background: '#e8f5e9', padding: '12px', borderRadius: '12px', textAlign: 'center' }}>
+                  <div style={{ fontSize: '0.7rem', color: '#666' }}>Accuracy Score</div>
+                  <div style={{ fontSize: '1.4rem', fontWeight: 800, color: '#2ecc71' }}>{Math.round(lastQuestionFeedback.score || (lastQuestionFeedback.metrics?.semantic_score * 100) || 0)}/100</div>
+                </div>
+                <div style={{ background: '#fff9db', padding: '12px', borderRadius: '12px', textAlign: 'center' }}>
+                  <div style={{ fontSize: '0.7rem', color: '#666' }}>Emotion</div>
+                  <div style={{ fontSize: '1.2rem', fontWeight: 700 }}>{lastQuestionFeedback.metrics?.emotion || 'Neutral'}</div>
+                </div>
+                <div style={{ background: '#f3f0ff', padding: '12px', borderRadius: '12px', textAlign: 'center' }}>
+                  <div style={{ fontSize: '0.7rem', color: '#666' }}>Posture</div>
+                  <div style={{ fontSize: '1.2rem', fontWeight: 700 }}>{lastQuestionFeedback.metrics?.posture || 'Safe'}</div>
+                </div>
               </div>
-            )}
-            {mediaInitialized && micEnabled && speakerStatus !== null && (
-              <div style={{
-                display: 'flex',
-                alignItems: 'center',
-                gap: '8px'
-              }}>
-                <span style={{ fontSize: '12px', color: '#7f8c8d', fontWeight: '500' }}>Speaker Detection:</span>
-                <span style={{
-                  padding: '4px 12px',
-                  borderRadius: '12px',
-                  fontSize: '13px',
-                  fontWeight: 'bold',
-                  color: 'white',
-                  background: speakerStatus === 'multiple' ? '#ff4757' : 
-                             speakerStatus === 'single' ? '#2ecc71' : 
-                             '#95a5a6'
-                }}>
-                  {speakerStatus === 'multiple' ? '🚨 MULTIPLE SPEAKERS' : 
-                   speakerStatus === 'single' ? '🟢 SINGLE SPEAKER' : 
-                   '🔇 NO SPEECH'}
-                </span>
+
+              <div className="pros-cons-grid" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '20px', marginBottom: '30px' }}>
+                <div style={{ background: '#f0fff4', padding: '20px', borderRadius: '16px' }}>
+                  <h4 style={{ color: '#27ae60', margin: '0 0 10px 0' }}><i className="fa fa-check-circle"></i> Strengths</h4>
+                  <ul style={{ paddingLeft: '20px', margin: 0, fontSize: '0.9rem' }}>
+                    {(lastQuestionFeedback.positives || ["Great technical content."]).map((p, i) => <li key={i}>{p}</li>)}
+                  </ul>
+                </div>
+                <div style={{ background: '#fff5f5', padding: '20px', borderRadius: '16px' }}>
+                  <h4 style={{ color: '#e74c3c', margin: '0 0 10px 0' }}><i className="fa fa-lightbulb-o"></i> Improvement</h4>
+                  <ul style={{ paddingLeft: '20px', margin: 0, fontSize: '0.9rem' }}>
+                    {(lastQuestionFeedback.negatives || ["Try to be more specific."]).map((n, i) => <li key={i}>{n}</li>)}
+                  </ul>
+                </div>
               </div>
-            )}
-            {mediaInitialized && micEnabled && dominantEmotion && (
-              <div style={{
-                display: 'flex',
-                alignItems: 'center',
-                gap: '8px'
-              }}>
-                <span style={{ fontSize: '12px', color: '#7f8c8d', fontWeight: '500' }}>Emotion:</span>
-                <span style={{
-                  padding: '4px 12px',
-                  borderRadius: '12px',
-                  fontSize: '13px',
-                  fontWeight: 'bold',
+
+              <button
+                onClick={handleNextQuestion}
+                style={{
+                  width: '100%',
+                  background: '#6c5ce7',
                   color: 'white',
-                  background: dominantEmotion === 'happy' ? '#2ecc71' :
-                             dominantEmotion === 'angry' ? '#ff4757' :
-                             dominantEmotion === 'sad' ? '#3498db' :
-                             dominantEmotion === 'fear' ? '#9b59b6' :
-                             dominantEmotion === 'surprise' ? '#f39c12' :
-                             dominantEmotion === 'disgust' ? '#e67e22' :
-                             dominantEmotion === 'neutral' ? '#7f8c8d' :
-                             '#95a5a6'
+                  border: 'none',
+                  padding: '16px',
+                  borderRadius: '12px',
+                  fontWeight: 800,
+                  fontSize: '1rem',
+                  cursor: 'pointer',
+                  boxShadow: '0 4px 15px rgba(108, 92, 231, 0.3)'
+                }}
+              >
+                Continue to Next Question <i className="fa fa-arrow-right"></i>
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* Dashboard Grid */}
+        <div className="dashboard-grid">
+          {/* AI Column */}
+          <div className="panel-card ai-column">
+            <div className="panel-header">
+              <i className="fa fa-user-circle"></i> AI Interviewer
+              <div style={{ marginLeft: 'auto', fontSize: '0.75rem', color: '#00b894' }}>
+                • Online <span style={{ color: '#636e72', marginLeft: '5px' }}>{isSpeaking ? 'Speaking' : 'Listening'}</span>
+              </div>
+            </div>
+
+            <div className="video-wrapper">
+              <div className="avatar-realistic-centered">
+                <div style={{
+                  width: '100%',
+                  height: '100%',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  overflow: 'hidden'
                 }}>
-                  {dominantEmotion.toUpperCase()}
-                  {emotionConfidence && ` (${(emotionConfidence * 100).toFixed(0)}%)`}
-                </span>
+                  <ErrorBoundary fallback={
+                    <img
+                      src={avatarImage}
+                      alt="AI Interviewer"
+                      className="static-avatar-image"
+                      style={{
+                        width: '100%',
+                        height: '100%',
+                        objectFit: 'cover',
+                        objectPosition: 'top center'
+                      }}
+                    />
+                  }>
+                    {/* Zoomed in camera for "Passport Photo" look - Head & Shoulders */}
+                    <Canvas shadows camera={{ position: [0, 1.65, 3.5], fov: 18 }}>
+                      <Experience />
+                    </Canvas>
+                  </ErrorBoundary>
+                </div>
+
+                <div className={`avatar-pulse ${isSpeaking ? 'active' : ''}`} style={{
+                  position: 'absolute',
+                  bottom: '20px',
+                  right: '20px',
+                  width: '12px',
+                  height: '12px',
+                  borderRadius: '50%',
+                  background: isSpeaking ? '#2ecc71' : '#95a5a6',
+                  boxShadow: isSpeaking ? '0 0 10px #2ecc71' : 'none',
+                  zIndex: 2
+                }}></div>
+              </div>
+            </div>
+
+            {/* NEW: AI Subtitle box below the photo */}
+            <div className="ai-subtitle-container" style={{
+              padding: '16px 20px',
+              minHeight: '80px',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              borderTop: '1px solid rgba(255,255,255,0.5)'
+            }}>
+              {questionSubtitle ? (
+                <div style={{
+                  background: 'rgba(255, 255, 255, 0.9)',
+                  padding: '12px 20px',
+                  borderRadius: '12px',
+                  textAlign: 'left',
+                  fontWeight: '600',
+                  color: '#1e293b',
+                  fontSize: '0.95rem',
+                  lineHeight: '1.5',
+                  backdropFilter: 'blur(12px)',
+                  boxShadow: '0 4px 15px rgba(0,0,0,0.1)',
+                  width: '100%',
+                  border: '1px solid rgba(255,255,255,0.8)'
+                }}>
+                  {questionSubtitle}
+                </div>
+              ) : (
+                <span style={{ color: '#64748b', fontSize: '0.85rem', fontStyle: 'italic' }}>Waiting for AI to speak...</span>
+              )}
+            </div>
+
+          </div>
+
+          {/* User Column */}
+          <div className="panel-card user-column">
+            <div className="panel-header">
+              <i className="fa fa-user"></i> You <span style={{ color: '#64748b', fontSize: '0.85rem', marginLeft: '8px' }}>Your Response</span>
+            </div>
+
+            <div className="video-wrapper">
+              <video
+                ref={videoRef}
+                autoPlay
+                playsInline
+                muted
+                className="video-element"
+              />
+
+              {/* TOP-LEFT: POSTURE PILL */}
+              <div style={{ position: 'absolute', top: '12px', left: '12px', zIndex: 10 }}>
+                {postureLabel && (
+                  <div style={{
+                    backgroundColor: (postureLabel.toLowerCase().includes('good') || postureLabel.toLowerCase() === 'appropriate') ? '#f0fdf4' :
+                      (postureLabel.toLowerCase().includes('lean') || postureLabel.toLowerCase() === 'defensive') ? '#fefce8' : '#f1f5f9', // Neutral gray for others instead of red
+                    color: (postureLabel.toLowerCase().includes('good') || postureLabel.toLowerCase() === 'appropriate') ? '#16a34a' :
+                      (postureLabel.toLowerCase().includes('lean') || postureLabel.toLowerCase() === 'defensive') ? '#eab308' : '#64748b',
+                    border: '1px solid',
+                    borderColor: (postureLabel.toLowerCase().includes('good') || postureLabel.toLowerCase() === 'appropriate') ? '#bbf7d0' :
+                      (postureLabel.toLowerCase().includes('lean') || postureLabel.toLowerCase() === 'defensive') ? '#fef08a' : '#cbd5e1',
+                    padding: '6px 14px',
+                    borderRadius: '6px',
+                    fontSize: '0.7rem',
+                    fontWeight: '700',
+                    textTransform: 'uppercase',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '6px',
+                    boxShadow: '0 4px 12px rgba(0,0,0,0.1)',
+                    backdropFilter: 'blur(4px)'
+                  }}>
+                    <span style={{ fontSize: '10px' }}>
+                      {(postureLabel.toLowerCase().includes('good') || postureLabel.toLowerCase() === 'appropriate') ? '✓' : 'ℹ️'}
+                    </span>
+                    POSTURE: {postureLabel}
+                  </div>
+                )}
+              </div>
+
+              {/* TOP-RIGHT: FACE DETECTION PILL */}
+              <div style={{ position: 'absolute', top: '12px', right: '12px', zIndex: 10 }}>
+                <div style={{
+                  backgroundColor: faceCount > 1 ? '#fef2f2' : '#f0fdf4',
+                  color: faceCount > 1 ? '#dc2626' : '#16a34a',
+                  border: '1px solid',
+                  borderColor: faceCount > 1 ? '#fecaca' : '#bbf7d0',
+                  padding: '6px 14px',
+                  borderRadius: '6px',
+                  fontSize: '0.7rem',
+                  fontWeight: '700',
+                  textTransform: 'uppercase',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '6px',
+                  boxShadow: '0 4px 12px rgba(0,0,0,0.1)',
+                  backdropFilter: 'blur(4px)'
+                }}>
+                  <span style={{ fontSize: '12px' }}>📹</span>
+                  {faceCount > 1 ? `MULTIPLE FACES (${faceCount}) ⚠️` : 'SINGLE FACE ✓'}
+                </div>
+                {!isInterviewee && (
+                  <div style={{
+                    backgroundColor: '#fef2f2',
+                    color: '#dc2626',
+                    border: '1px solid #fecaca',
+                    padding: '6px 14px',
+                    borderRadius: '6px',
+                    fontSize: '0.7rem',
+                    fontWeight: '700',
+                    textTransform: 'uppercase',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '6px',
+                    boxShadow: '0 4px 12px rgba(0,0,0,0.1)',
+                    marginTop: '8px',
+                    backdropFilter: 'blur(4px)'
+                  }}>
+                    <span style={{ fontSize: '12px' }}>⚠️</span> UNKNOWN SPEAKER
+                  </div>
+                )}
+              </div>
+
+              {/* BOTTOM-RIGHT: EMOTION PILL */}
+              <div style={{ position: 'absolute', bottom: '12px', right: '12px', zIndex: 10 }}>
+                <div style={{
+                  backgroundColor: 'rgba(255, 255, 255, 0.9)',
+                  padding: '10px 16px',
+                  borderRadius: '10px',
+                  textAlign: 'center',
+                  boxShadow: '0 4px 12px rgba(0,0,0,0.1)',
+                  border: '1px solid rgba(255,255,255,0.8)',
+                  backdropFilter: 'blur(8px)'
+                }}>
+                  <div style={{ fontSize: '0.85rem', color: '#1e293b', fontWeight: '800' }}>
+                    {(hasSpeech || isActuallySpeaking) ? (dominantEmotion || 'NEUTRAL') : 'SILENT'}
+                  </div>
+                  <div style={{ fontSize: '0.55rem', color: '#64748b', marginTop: '2px' }}>
+                    {(hasSpeech || isActuallySpeaking) ? (emotionConfidence > 0 ? `Confidence: ${emotionConfidence}%` : 'Voice detected...') : 'Waiting for voice...'}
+                  </div>
+                </div>
+              </div>
+
+              {/* BOTTOM-LEFT: SPEAKING NOW INDICATOR */}
+              {showSpeakNow && (
+                <div style={{ position: 'absolute', bottom: '12px', left: '12px', zIndex: 10 }}>
+                  <div style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '8px',
+                    backgroundColor: 'rgba(255,255,255,0.9)',
+                    padding: '8px 14px',
+                    borderRadius: '8px',
+                    border: '1px solid rgba(255,255,255,0.8)',
+                    boxShadow: '0 4px 12px rgba(0,0,0,0.1)'
+                  }}>
+                    <span className="live-dot" style={{
+                      width: '8px',
+                      height: '8px',
+                      borderRadius: '50%',
+                      backgroundColor: '#ef4444',
+                      animation: 'pulse 1.5s infinite'
+                    }}></span>
+                    <span style={{ color: '#1e293b', fontWeight: '800', fontSize: '0.75rem', textTransform: 'uppercase', letterSpacing: '0.5px' }}>SPEAKING NOW</span>
+                  </div>
+                </div>
+              )}
+
+            </div>
+
+            <div className="response-area">
+              {(interviewStage === 'listening_for_answer' || interviewStage === 'listening_for_start') ? (
+                <>
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '10px', marginBottom: '15px' }}>
+                    <div className="mic-status-container" style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                      <div className="mic-visualizer" style={{
+                        width: '40px',
+                        height: '40px',
+                        borderRadius: '50%',
+                        background: isActuallySpeaking ? 'rgba(239, 68, 68, 0.1)' : 'rgba(148, 163, 184, 0.1)',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        position: 'relative'
+                      }}>
+                        <i className={`fa fa-microphone ${isActuallySpeaking ? 'pulse-red' : ''}`} style={{
+                          color: isActuallySpeaking ? '#ef4444' : '#94a3b8',
+                          fontSize: '1.2rem'
+                        }}></i>
+                        {/* Audio level circle */}
+                        <div style={{
+                          position: 'absolute',
+                          inset: '-4px',
+                          borderRadius: '50%',
+                          border: '2px solid',
+                          borderColor: isActuallySpeaking ? '#ef4444' : '#e2e8f0',
+                          opacity: micLevel / 255,
+                          transform: `scale(${1 + (micLevel / 255)})`,
+                          transition: 'transform 0.1s ease',
+                          pointerEvents: 'none'
+                        }}></div>
+                      </div>
+
+                      <div style={{ display: 'flex', flexDirection: 'column' }}>
+                        <span style={{
+                          fontSize: '0.85rem',
+                          fontWeight: 800,
+                          color: isActuallySpeaking ? '#ef4444' : '#64748b',
+                          letterSpacing: '0.5px'
+                        }}>
+                          {isActuallySpeaking ? 'RECORDING VOICE...' : 'LISTENING...'}
+                        </span>
+                        <div style={{
+                          width: '100px',
+                          height: '4px',
+                          background: '#f1f5f9',
+                          borderRadius: '2px',
+                          marginTop: '4px',
+                          overflow: 'hidden'
+                        }}>
+                          <div style={{
+                            width: `${Math.min(micLevel * 1.5, 100)}%`,
+                            height: '100%',
+                            background: isActuallySpeaking ? '#ef4444' : '#94a3b8',
+                            transition: 'width 0.1s ease'
+                          }}></div>
+                        </div>
+                      </div>
+                    </div>
+
+                    {!isListening ? (
+                      <button
+                        onClick={startListening}
+                        className="record-toggle-btn"
+                        style={{
+                          background: '#f8fafc',
+                          border: '1px solid #e2e8f0',
+                          color: '#475569',
+                          padding: '8px 16px',
+                          borderRadius: '8px',
+                          fontSize: '0.8rem',
+                          fontWeight: '700',
+                          cursor: 'pointer',
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: '8px'
+                        }}
+                      >
+                        <i className="fa fa-play"></i> RESUME MIC
+                      </button>
+                    ) : (
+                      <button
+                        onClick={stopListeningAndSave}
+                        className="record-toggle-btn"
+                        style={{
+                          background: '#fef2f2',
+                          border: '1px solid #fecaca',
+                          color: '#dc2626',
+                          padding: '8px 16px',
+                          borderRadius: '8px',
+                          fontSize: '0.8rem',
+                          fontWeight: '700',
+                          cursor: 'pointer',
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: '8px'
+                        }}
+                      >
+                        <i className="fa fa-stop"></i> FINISH NOW
+                      </button>
+                    )}
+                  </div>
+
+                  <div className="transcript-box" style={{
+                    position: 'relative',
+                    background: '#ffffff',
+                    borderRadius: '16px',
+                    border: '1px solid #e2e8f0',
+                    padding: '20px',
+                    boxShadow: 'inset 0 2px 4px rgba(0,0,0,0.02)',
+                    minHeight: '80px'
+                  }}>
+                    <p style={{
+                      margin: 0,
+                      color: '#1e293b',
+                      fontSize: '1rem',
+                      fontWeight: '500',
+                      lineHeight: '1.6'
+                    }}>
+                      {userAnswerSubtitle || (
+                        <span style={{ color: '#94a3b8', fontStyle: 'italic' }}>
+                          Start speaking... If your voice is not appearing, try clicking "Resume Mic" or check your browser permissions.
+                        </span>
+                      )}
+                    </p>
+
+                    {isActuallySpeaking && (
+                      <div className="typing-indicator" style={{
+                        position: 'absolute',
+                        bottom: '12px',
+                        right: '16px',
+                        display: 'flex',
+                        gap: '3px'
+                      }}>
+                        <div className="dot"></div>
+                        <div className="dot"></div>
+                        <div className="dot"></div>
+                      </div>
+                    )}
+                  </div>
+
+
+                </>
+              ) : interviewStage === 'question_speaking' ? (
+                <div style={{ textAlign: 'center' }}>
+                  <p style={{ margin: 0, color: '#16a34a', fontWeight: 700 }}>
+                    <i className="fa fa-volume-up"></i> AI IS SPEAKING...
+                  </p>
+                  <p style={{ margin: 5, color: '#64748b', fontSize: '0.85rem' }}>Listen carefully to the question</p>
+                </div>
+              ) : (
+                <div style={{ textAlign: 'center' }}>
+                  <p style={{ margin: 0, color: '#8b5cf6', fontWeight: 700, marginBottom: '5px' }}>
+                    {interviewStage === 'greeting' ? 'Interview will begin after the greeting...' :
+                      interviewStage === 'processing' ? 'Processing Response...' : 'Waiting...'}
+                  </p>
+                  {userAnswerSubtitle && (
+                    <p style={{ margin: 0, color: '#334155', fontSize: '1rem', fontStyle: 'italic', fontWeight: '500' }}>
+                      "{userAnswerSubtitle}"
+                    </p>
+                  )}
+                </div>
+              )}
+
+              {/* Submit Button - ALWAYS Show during listening stage to give user control */}
+              {interviewStage === 'listening_for_answer' && (
+                <button
+                  className="submit-btn-dashboard"
+                  onClick={stopListeningAndSave}
+                  style={{
+                    backgroundColor: userAnswerSubtitle ? 'var(--grade-primary)' : '#475569',
+                    backgroundImage: userAnswerSubtitle ? 'var(--grade-primary)' : 'none',
+                    cursor: userAnswerSubtitle ? 'pointer' : 'not-allowed',
+                    opacity: 1,
+                    marginTop: '15px'
+                  }}
+                  disabled={!userAnswerSubtitle && !isProcessing}
+                >
+                  Submit Answer <i className="fa fa-arrow-right"></i>
+                </button>
+              )}
+            </div>
+          </div>
+        </div>
+
+        {/* Global Action: End Session below grid or in navbar? 
+            Original had Logout in navbar. Reference image shows Logout in top right. 
+            The Navbar component likely handles this, but let's add a button if needed. */}
+        <div style={{ textAlign: 'center', marginTop: '20px' }}>
+          <button className="logout-btn-dashboard" onClick={handleEndInterview}>
+            End Interview Session
+          </button>
+        </div>
+
+        {/* Setup Overlay */}
+        {(!mediaInitialized || error) && (
+          <div className="setup-overlay">
+            {error ? (
+              <div className="error-box">
+                <p>{error}</p>
+                <button onClick={initializeMedia} className="retry-btn">Retry Setup</button>
+              </div>
+            ) : (
+              <div className="loading-box">
+                <i className="fa fa-spinner fa-spin" style={{ fontSize: '2rem', color: '#6c5ce7', marginBottom: '15px' }}></i>
+                <h3>Initializing Interview Environment</h3>
+                <p>Please allow camera and microphone access in your browser.</p>
               </div>
             )}
           </div>
         )}
-      </div>
-
-      {error && (
-        <div className="error-message">
-          {error}
-          <button onClick={initializeMedia} className="retry-btn">Retry</button>
-        </div>
-      )}
-
-      <div className="call">
-        {/* Avatar side */}
-        <div className="avatar">
-          <div className="credentials">
-            <div className="name">
-              <span>AI Interviewer</span>
-            </div>
-            <div className="status">
-              <i className="fa fa-circle" aria-hidden="true"></i> Online
-              {isSpeaking && <span className='speaking'>Speaking</span>}
-            </div>
-          </div>
-
-          <div className="avatar-display">
-            <div className="askquestion">
-              <div>
-                <i className={`fa fa-circle ${isSpeaking ? 'pulsing' : ''}`} aria-hidden="true"></i>
-              </div>
-              <div className="question-subtitle-container">
-                {questionSubtitle && (
-                  <div className="question-subtitle">
-                    <p>{questionSubtitle}</p>
-                  </div>
-                )}
-                {isSpeaking && (
-                  <div className="speaking-indicator">
-                    <span>AI Interviewer is speaking...</span>
-                  </div>
-                )}
-              </div>
-            </div>
-          </div>
-        </div>
-
-        {/* User side */}
-        <div className="user">
-          <div className="username">
-            <i className="fa fa-user-circle" aria-hidden="true"></i>
-            <span>You</span>
-            <span className="user-status">Your Response</span>
-          </div>
-
-          <div className="user-display">
-            {/* User Answer Subtitle - Always show when listening or has answer */}
-            {(isListening || userAnswerSubtitle) && (
-              <div className="user-answer-subtitle-container">
-                <div className="user-answer-subtitle">
-                  <p>{userAnswerSubtitle || 'Listening for your answer...'}</p>
-                </div>
-                {isListening && (
-                  <div className="listening-indicator">
-                    <span>🎤 Listening... Speak now</span>
-                  </div>
-                )}
-                {!isListening && userAnswerSubtitle && (
-                  <button 
-                    onClick={stopListeningAndSave}
-                    className="save-answer-btn"
-                    style={{
-                      marginTop: '10px',
-                      padding: '10px 20px',
-                      background: '#2ecc71',
-                      color: 'white',
-                      border: 'none',
-                      borderRadius: '6px',
-                      cursor: 'pointer',
-                      fontSize: '15px',
-                      fontWeight: 'bold',
-                      boxShadow: '0 4px 8px rgba(0, 0, 0, 0.2)',
-                      transition: 'all 0.2s ease'
-                    }}
-                    onMouseEnter={(e) => e.target.style.background = '#27ae60'}
-                    onMouseLeave={(e) => e.target.style.background = '#2ecc71'}
-                  >
-                    ✓ Save Answer & Next Question
-                  </button>
-                )}
-              </div>
-            )}
-            {/* Detection results overlay - Posture */}
-            {postureLabel && (
-              <div className="detection-results-posture" style={{
-                position: 'absolute',
-                top: '20px',
-                left: '20px',
-                background: postureLabel === 'appropriate' ? 'rgba(46, 213, 115, 0.9)' : 
-                           postureLabel === 'cheating' ? 'rgba(255, 71, 87, 0.9)' : 
-                           'rgba(255, 165, 0, 0.9)',
-                color: 'white',
-                padding: '12px 20px',
-                borderRadius: '8px',
-                zIndex: 10,
-                fontSize: '16px',
-                fontWeight: 'bold',
-                boxShadow: '0 4px 6px rgba(0, 0, 0, 0.3)',
-                display: 'flex',
-                alignItems: 'center',
-                gap: '10px'
-              }}>
-                <i className={`fa ${postureLabel === 'appropriate' ? 'fa-check-circle' : 
-                               postureLabel === 'cheating' ? 'fa-exclamation-triangle' : 
-                               'fa-shield-alt'}`} style={{ fontSize: '20px' }}></i>
-                <div>
-                  <div style={{ fontSize: '12px', opacity: 0.9, marginBottom: '2px' }}>POSTURE DETECTED</div>
-                  <div style={{ textTransform: 'uppercase', letterSpacing: '1px' }}>
-                    {postureLabel}
-                  </div>
-                  {postureConfidence && (
-                    <div style={{ fontSize: '12px', opacity: 0.9, marginTop: '4px' }}>
-                      Confidence: {(postureConfidence * 100).toFixed(1)}%
-                    </div>
-                  )}
-                </div>
-              </div>
-            )}
-
-            {/* Detection results overlay - Face Detection */}
-            {mediaInitialized && cameraEnabled && (
-              <div className="detection-results-faces" style={{
-                position: 'absolute',
-                top: '20px',
-                right: '20px',
-                background: faceCount === 0 ? 'rgba(149, 165, 166, 0.9)' :
-                           faceCount > 1 ? 'rgba(255, 71, 87, 0.9)' : 
-                           'rgba(46, 213, 115, 0.9)',
-                color: 'white',
-                padding: '12px 20px',
-                borderRadius: '8px',
-                zIndex: 10,
-                fontSize: '16px',
-                fontWeight: 'bold',
-                boxShadow: '0 4px 6px rgba(0, 0, 0, 0.3)',
-                display: 'flex',
-                alignItems: 'center',
-                gap: '10px',
-                animation: faceCount > 1 ? 'pulse 2s infinite' : 'none'
-              }}>
-                <i className={`fa ${faceCount === 0 ? 'fa-user-slash' :
-                               faceCount > 1 ? 'fa-exclamation-triangle' : 
-                               'fa-user-check'}`} 
-                   style={{ fontSize: '20px' }}></i>
-                <div>
-                  <div style={{ fontSize: '12px', opacity: 0.9, marginBottom: '2px' }}>FACE DETECTION</div>
-                  <div style={{ textTransform: 'uppercase', letterSpacing: '1px' }}>
-                    {faceCount === 0 ? 'No Face Detected' : 
-                     faceCount === 1 ? 'Single Face ✓' : 
-                     `${faceCount} Faces - Warning!`}
-                  </div>
-                  {faceCount > 1 && (
-                    <div style={{ fontSize: '12px', opacity: 0.9, marginTop: '4px', fontWeight: 'normal' }}>
-                      Multiple faces detected - Possible cheating!
-                    </div>
-                  )}
-                  {faceCount === 0 && (
-                    <div style={{ fontSize: '12px', opacity: 0.9, marginTop: '4px', fontWeight: 'normal' }}>
-                      Please position yourself in front of camera
-                    </div>
-                  )}
-                </div>
-              </div>
-            )}
-
-            {/* Detection results overlay - Emotion Detection */}
-            {mediaInitialized && micEnabled && dominantEmotion && (
-              <div className="detection-results-emotion" style={{
-                position: 'absolute',
-                bottom: speakerStatus !== null ? '180px' : '100px',
-                right: '20px',
-                background: dominantEmotion === 'happy' ? 'rgba(46, 213, 115, 0.9)' :
-                           dominantEmotion === 'angry' ? 'rgba(255, 71, 87, 0.9)' :
-                           dominantEmotion === 'sad' ? 'rgba(52, 152, 219, 0.9)' :
-                           dominantEmotion === 'fear' ? 'rgba(155, 89, 182, 0.9)' :
-                           dominantEmotion === 'surprise' ? 'rgba(243, 156, 18, 0.9)' :
-                           dominantEmotion === 'disgust' ? 'rgba(230, 126, 34, 0.9)' :
-                           dominantEmotion === 'neutral' ? 'rgba(127, 140, 141, 0.9)' :
-                           'rgba(149, 165, 166, 0.9)',
-                color: 'white',
-                padding: '12px 20px',
-                borderRadius: '8px',
-                zIndex: 10,
-                fontSize: '16px',
-                fontWeight: 'bold',
-                boxShadow: '0 4px 6px rgba(0, 0, 0, 0.3)',
-                display: 'flex',
-                alignItems: 'center',
-                gap: '10px',
-                minWidth: '200px'
-              }}>
-                <i className={`fa ${
-                  dominantEmotion === 'happy' ? 'fa-smile' :
-                  dominantEmotion === 'angry' ? 'fa-angry' :
-                  dominantEmotion === 'sad' ? 'fa-sad-tear' :
-                  dominantEmotion === 'fear' ? 'fa-surprise' :
-                  dominantEmotion === 'surprise' ? 'fa-surprise' :
-                  dominantEmotion === 'disgust' ? 'fa-grimace' :
-                  dominantEmotion === 'neutral' ? 'fa-meh' :
-                  'fa-meh'
-                }`} style={{ fontSize: '20px' }}></i>
-                <div>
-                  <div style={{ fontSize: '12px', opacity: 0.9, marginBottom: '2px' }}>EMOTION DETECTED</div>
-                  <div style={{ textTransform: 'uppercase', letterSpacing: '1px' }}>
-                    {dominantEmotion}
-                  </div>
-                  {emotionConfidence && (
-                    <div style={{ fontSize: '12px', opacity: 0.9, marginTop: '4px' }}>
-                      Confidence: {(emotionConfidence * 100).toFixed(1)}%
-                    </div>
-                  )}
-                  {emotionProbabilities && (
-                    <div style={{ fontSize: '10px', opacity: 0.8, marginTop: '6px', maxHeight: '60px', overflowY: 'auto' }}>
-                      {Object.entries(emotionProbabilities)
-                        .sort((a, b) => b[1] - a[1])
-                        .slice(0, 3)
-                        .map(([emotion, prob]) => (
-                          <div key={emotion} style={{ marginTop: '2px' }}>
-                            {emotion}: {(prob * 100).toFixed(1)}%
-                          </div>
-                        ))}
-                    </div>
-                  )}
-                </div>
-              </div>
-            )}
-
-            {/* Detection results overlay - Speaker Detection */}
-            {mediaInitialized && micEnabled && speakerStatus !== null && (
-              <div className="detection-results-speakers" style={{
-                position: 'absolute',
-                bottom: '100px',
-                right: '20px',
-                background: speakerStatus === 'multiple' ? 'rgba(255, 71, 87, 0.9)' :
-                           speakerStatus === 'single' ? 'rgba(46, 213, 115, 0.9)' : 
-                           'rgba(149, 165, 166, 0.9)',
-                color: 'white',
-                padding: '12px 20px',
-                borderRadius: '8px',
-                zIndex: 10,
-                fontSize: '16px',
-                fontWeight: 'bold',
-                boxShadow: '0 4px 6px rgba(0, 0, 0, 0.3)',
-                display: 'flex',
-                alignItems: 'center',
-                gap: '10px',
-                animation: speakerStatus === 'multiple' ? 'pulse 2s infinite' : 'none'
-              }}>
-                <i className={`fa ${speakerStatus === 'multiple' ? 'fa-exclamation-triangle' :
-                               speakerStatus === 'single' ? 'fa-microphone' : 
-                               'fa-microphone-slash'}`} 
-                   style={{ fontSize: '20px' }}></i>
-                <div>
-                  <div style={{ fontSize: '12px', opacity: 0.9, marginBottom: '2px' }}>SPEAKER DETECTION</div>
-                  <div style={{ textTransform: 'uppercase', letterSpacing: '1px' }}>
-                    {speakerStatus === 'multiple' ? '🚨 Multiple Speakers!' : 
-                     speakerStatus === 'single' ? '🟢 Single Speaker ✓' : 
-                     '🔇 No Speech'}
-                  </div>
-                  {speakerStatus === 'multiple' && (
-                    <div style={{ fontSize: '12px', opacity: 0.9, marginTop: '4px', fontWeight: 'normal' }}>
-                      Multiple voices detected - Possible cheating!
-                      {speakerConfidence && (
-                        <span> (Confidence: {(speakerConfidence * 100).toFixed(1)}%)</span>
-                      )}
-                    </div>
-                  )}
-                  {speakerStatus === 'single' && speakerConfidence && (
-                    <div style={{ fontSize: '12px', opacity: 0.9, marginTop: '4px', fontWeight: 'normal' }}>
-                      Confidence: {(speakerConfidence * 100).toFixed(1)}%
-                    </div>
-                  )}
-                </div>
-              </div>
-            )}
-            
-            {/* Always render video element when media is initialized */}
-            <video 
-              ref={videoRef} 
-              autoPlay 
-              muted 
-              playsInline
-              className="video-feed"
-              style={{ 
-                display: (mediaInitialized && cameraEnabled) ? 'block' : 'none',
-                zIndex: 1
-              }}
-            />
-            
-            {/* Show placeholder when no camera or camera disabled */}
-            {(!mediaInitialized || !cameraEnabled) && (
-              <div className="screen">
-                <i className="fa fa-video-camera" aria-hidden="true"></i>
-                <p>
-                  {!mediaInitialized ? 'Initializing camera...' : 
-                   !cameraEnabled ? 'Camera is disabled' : 
-                   'Camera feed would appear here'}
-                </p>
-                {!mediaInitialized && (
-                  <button onClick={initializeMedia} className="start-camera-btn">
-                    Start Camera
-                  </button>
-                )}
-              </div>
-            )}
-            
-            {/* Camera controls - only show when media is initialized */}
-            {mediaInitialized && (
-              <div className="camera-controls">
-                <button 
-                  onClick={toggleCamera} 
-                  className={`control-btn ${cameraEnabled ? 'active' : 'inactive'}`}
-                  title={cameraEnabled ? 'Turn off camera' : 'Turn on camera'}
-                >
-                  <i className={`fa ${cameraEnabled ? 'fa-video-camera' : 'fa-video-camera'}`}></i>
-                </button>
-                
-                <button 
-                  onClick={toggleMicrophone} 
-                  className={`control-btn ${micEnabled ? 'active' : 'inactive'}`}
-                  title={micEnabled ? 'Mute microphone' : 'Unmute microphone'}
-                >
-                  <i className={`fa ${micEnabled ? 'fa-microphone' : 'fa-microphone-slash'}`}></i>
-                </button>
-              </div>
-            )}
-
-            <div className='buttons'>
-              <button 
-                className={`recording-btn ${isRecording ? 'recording' : ''}`}
-                onClick={isRecording ? stopRecording : startRecording}
-                disabled={!mediaInitialized}
-              >
-                <i className={`fa ${isRecording ? 'fa-stop' : 'fa-circle'}`}></i>
-                {isRecording ? 'Stop Recording' : 'Start Recording'}
-              </button>
-            </div>
-
-            {/* Audio levels indicator */}
-            {micEnabled && mediaInitialized && (
-              <div className="audio-levels">
-                <div className="audio-bar"></div>
-                <div className="audio-bar"></div>
-                <div className="audio-bar"></div>
-                <div className="audio-bar"></div>
-                <div className="audio-bar"></div>
-                <div className="audio-bar"></div>
-                <div className="audio-bar"></div>
-                <div className="audio-bar"></div>
-                <div className="audio-bar"></div>
-                <div className="audio-bar"></div>
-              </div>
-            )}
-          </div>  
-        </div>
-      </div>
-      
-      <div className="stop">
-        <button><i className="fa fa-stop" aria-hidden="true"></i> Stop Interview</button>
-      </div>
+      </div >
     </>
-  )
+  );
 }
 
 export default Interview

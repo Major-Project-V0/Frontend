@@ -4,7 +4,7 @@
  */
 import axios from 'axios';
 
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000';
+const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://127.0.0.1:8000';
 
 /**
  * Helper function to validate and get token
@@ -15,7 +15,7 @@ const getValidToken = () => {
   if (!token || token.trim() === '' || token === 'null' || token === 'undefined') {
     return null;
   }
-  
+
   // Basic JWT format validation (3 parts separated by dots)
   try {
     const parts = token.split('.');
@@ -31,7 +31,7 @@ const getValidToken = () => {
           return null;
         }
         return token;
-      } catch (e) {
+      } catch {
         // Invalid payload, clear token
         console.log('Invalid token payload, clearing...');
         localStorage.removeItem('token');
@@ -60,12 +60,12 @@ const buildHeaders = () => {
   const headers = {
     'Content-Type': 'application/json',
   };
-  
+
   const token = getValidToken();
   if (token) {
     headers['Authorization'] = `Bearer ${token}`;
   }
-  
+
   return headers;
 };
 
@@ -84,7 +84,8 @@ export const generateInterviewQuestions = async ({
   yearsOfExperience,
   candidateName = null,
   questionCount = null,
-  sessionId = null
+  sessionId = null,
+  focusAreas = []
 }) => {
   // Clear any invalid tokens first
   const token = localStorage.getItem('token');
@@ -108,20 +109,22 @@ export const generateInterviewQuestions = async ({
           localStorage.removeItem('refreshToken');
         }
       }
-    } catch (e) {
+    } catch {
       localStorage.removeItem('token');
       localStorage.removeItem('refreshToken');
     }
   }
-  
+
+
+  const questionCountValue = questionCount ||
+    parseInt(import.meta.env.VITE_QUESTION_GENERATION_COUNT) || 5;
+
   try {
-    const questionCountValue = questionCount || 
-      parseInt(import.meta.env.VITE_QUESTION_GENERATION_COUNT) || 5;
 
     // For question generation, don't require auth (endpoint uses AllowAny)
     // Only send token if it's valid, otherwise proceed without it
     const headers = buildHeaders(false);
-    
+
     const response = await axios.post(
       `${API_BASE_URL}/api/gemini/generate-questions/`,
       {
@@ -129,9 +132,13 @@ export const generateInterviewQuestions = async ({
         years_of_experience: yearsOfExperience,
         candidate_name: candidateName,
         question_count: questionCountValue,
-        session_id: sessionId
+        session_id: sessionId,
+        focus_areas: focusAreas
       },
-      { headers }
+      {
+        headers,
+        timeout: 120000 // 120 seconds timeout to prevent broken pipe
+      }
     );
 
     return {
@@ -140,12 +147,14 @@ export const generateInterviewQuestions = async ({
     };
   } catch (error) {
     console.error('Error generating questions:', error);
-    
+
     // Better error messages
     let errorMessage = 'Failed to generate questions';
-    
+
     if (error.code === 'ECONNREFUSED' || error.message.includes('Network Error') || error.message.includes('ERR_CONNECTION_REFUSED')) {
       errorMessage = 'Cannot connect to backend server. Please make sure the Django server is running on http://localhost:8000';
+    } else if (error.response && error.response.status === 429) {
+      errorMessage = 'Gemini API Quota Exceeded. Please wait a moment before trying again (Free tier limits reached).';
     } else if (error.response) {
       // Server responded with error status
       if (error.response && error.response.status === 401) {
@@ -153,7 +162,7 @@ export const generateInterviewQuestions = async ({
         console.log('401 error detected, clearing invalid token and retrying without authentication...');
         localStorage.removeItem('token');
         localStorage.removeItem('refreshToken');
-        
+
         // Retry the request without token
         try {
           const retryResponse = await axios.post(
@@ -172,7 +181,7 @@ export const generateInterviewQuestions = async ({
               }
             }
           );
-          
+
           console.log('Retry successful - questions generated without authentication');
           return {
             success: true,
@@ -196,7 +205,7 @@ export const generateInterviewQuestions = async ({
     } else {
       errorMessage = error.message || 'Failed to generate questions';
     }
-    
+
     return {
       success: false,
       error: errorMessage
@@ -306,6 +315,7 @@ export const getGeneratedQuestions = async (sessionId) => {
  * @param {string} params.userAnswer - User's answer (from speech-to-text)
  * @param {string} [params.idealAnswer] - Ideal answer (optional)
  * @param {Array} [params.alternativeAnswers] - Alternative answers (optional)
+ * @param {boolean} [params.isPrefetch] - Indicates if the response is part of a prefetch operation (optional)
  * @returns {Promise<Object>} Response with saved data
  */
 export const saveUserResponse = async ({
@@ -313,10 +323,15 @@ export const saveUserResponse = async ({
   questionId,
   questionText,
   userAnswer,
+  posture = null,
+  emotion = null,
+  confidence = 0,
   idealAnswer = null,
-  alternativeAnswers = []
+  alternativeAnswers = [],
+  isPrefetch = false
 }) => {
   try {
+    const headers = buildHeaders(true);
     const response = await axios.post(
       `${API_BASE_URL}/api/gemini/save-response/`,
       {
@@ -324,10 +339,14 @@ export const saveUserResponse = async ({
         question_id: questionId,
         question_text: questionText,
         user_answer: userAnswer,
+        posture_status: posture,
+        dominant_emotion: emotion,
+        emotion_confidence: confidence,
         ideal_answer: idealAnswer,
-        alternative_answers: alternativeAnswers
+        alternative_answers: alternativeAnswers,
+        is_prefetch: isPrefetch
       },
-      { headers: buildHeaders() }
+      { headers }
     );
 
     return {
@@ -336,6 +355,16 @@ export const saveUserResponse = async ({
     };
   } catch (error) {
     console.error('Error saving user response:', error);
+
+    // Check for 401 Unauthorized (Session Expired)
+    if (error.response && error.response.status === 401) {
+      console.warn('Session expired (401). Redirecting to login...');
+      localStorage.removeItem('token');
+      localStorage.removeItem('refreshToken');
+      window.location.href = '/login';
+      return { success: false, error: 'Session expired. Please log in again.' };
+    }
+
     return {
       success: false,
       error: error.response?.data?.error || error.message || 'Failed to save response'
@@ -388,6 +417,32 @@ export const processUserResponse = async ({
     return {
       success: false,
       error: error.response?.data?.error || error.message || 'Failed to process response'
+    };
+  }
+};
+
+/**
+ * End the interview session
+ * @param {string} sessionId - Session ID
+ * @returns {Promise<Object>} Response
+ */
+export const endInterview = async (sessionId) => {
+  try {
+    const response = await axios.post(
+      `${API_BASE_URL}/api/gemini/end-interview/`,
+      { session_id: sessionId },
+      { headers: buildHeaders() }
+    );
+
+    return {
+      success: true,
+      data: response.data
+    };
+  } catch (error) {
+    console.error('Error ending interview:', error);
+    return {
+      success: false,
+      error: error.response?.data?.error || error.message || 'Failed to end interview'
     };
   }
 };
